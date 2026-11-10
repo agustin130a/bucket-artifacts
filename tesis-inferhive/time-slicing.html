@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Time-slicing en InferHive</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: una columna de lectura (~68ch), bloques numerados solo donde hay secuencia real; un diagrama de turnos de GPU como pieza central. */
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --fg: #16202a;
+  --muted: #5a6876;
+  --line: #dde3ea;
+  --accent: #1f6feb;
+  --s1: #2f80ed;
+  --s2: #e0861a;
+  --s3: #2aa876;
+  --warn-bg: #fff4e5;
+  --warn-fg: #8a4b00;
+  --code-bg: #eef2f6;
+  --f-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f151c; --surface: #16202a; --fg: #e6edf3; --muted: #93a1b0; --line: #2a3644;
+    --accent: #5aa2ff; --s1: #5aa2ff; --s2: #f0a54a; --s3: #4cc795;
+    --warn-bg: #2e2312; --warn-fg: #f3c27a; --code-bg: #1d2935; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f151c; --surface: #16202a; --fg: #e6edf3; --muted: #93a1b0; --line: #2a3644;
+  --accent: #5aa2ff; --s1: #5aa2ff; --s2: #f0a54a; --s3: #4cc795;
+  --warn-bg: #2e2312; --warn-fg: #f3c27a; --code-bg: #1d2935; color-scheme: dark;
+}
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 var(--f-body); }
+.wrap { max-width: 760px; margin: 0 auto; padding-block: 40px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 40px; }
+h1, h2 { font-family: var(--f-display); text-wrap: balance; line-height: 1.2; margin: 0; }
+h1 { font-size: clamp(1.9rem, 5vw, 2.6rem); }
+h2 { font-size: 1.35rem; }
+p { margin: 0; }
+section { display: flex; flex-direction: column; gap: 14px; }
+.eyebrow { font: 500 .75rem var(--f-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.lead { font-size: 1.1rem; color: var(--muted); max-width: 62ch; }
+.meta { font: .8rem var(--f-mono); color: var(--muted); }
+header { display: flex; flex-direction: column; gap: 12px; }
+code { font: .88em var(--f-mono); background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+pre { margin: 0; background: var(--code-bg); border-radius: 8px; padding: 14px 16px; overflow-x: auto; font: .82rem/1.55 var(--f-mono); }
+pre code { background: none; padding: 0; }
+.cmt { color: var(--muted); }
+ul, ol { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 6px; }
+.fig { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; overflow-x: auto; }
+.fig svg { display: block; width: 100%; min-width: 560px; height: auto; }
+.fig figcaption { font-size: .85rem; color: var(--muted); margin-top: 10px; }
+figure { margin: 0; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.card h3 { margin: 0; font: 600 1rem var(--f-body); }
+.price { font: 500 1.6rem var(--f-display); font-variant-numeric: tabular-nums; }
+.price small { font: .8rem var(--f-mono); color: var(--muted); }
+.steps { list-style: none; padding: 0; counter-reset: s; gap: 12px; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 28px 1fr; gap: 10px; align-items: start; }
+.steps li::before { content: counter(s); font: 600 .8rem var(--f-mono); width: 24px; height: 24px; border-radius: 50%;
+  background: var(--accent); color: var(--surface); display: grid; place-items: center; margin-top: 2px; }
+.steps li > div { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.warn { background: var(--warn-bg); color: var(--warn-fg); border-radius: 10px; padding: 14px 16px; }
+.warn strong { display: block; margin-bottom: 4px; }
+svg text { font-family: var(--f-mono); }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <span class="eyebrow">InferHive · GPU</span>
+    <h1>Time-slicing en la RTX 3090</h1>
+    <p class="lead">Varias personas usan la misma GPU a la vez, por turnos. La 3090 de knode11 se ofrece como 3 slots: cada alquiler toma uno, o los tres si se pide la GPU completa.</p>
+    <p class="meta">Lectura: 5 min · Diseño completo en <code>docs/PLAN-gpu-slicing-3090.md</code></p>
+  </header>
+
+  <section>
+    <h2>La idea en un dibujo</h2>
+    <figure class="fig">
+      <svg viewBox="0 0 640 250" role="img" aria-label="Tres pods comparten la RTX 3090 por turnos de cómputo y comparten los 24 GB de VRAM">
+        <!-- pods -->
+        <g font-size="12">
+          <rect x="10" y="20" width="120" height="40" rx="6" fill="var(--surface)" stroke="var(--s1)" stroke-width="2"/>
+          <text x="70" y="45" text-anchor="middle" fill="var(--fg)">alumno-a · slot 1</text>
+          <rect x="10" y="80" width="120" height="40" rx="6" fill="var(--surface)" stroke="var(--s2)" stroke-width="2"/>
+          <text x="70" y="105" text-anchor="middle" fill="var(--fg)">alumno-b · slot 2</text>
+          <rect x="10" y="140" width="120" height="40" rx="6" fill="var(--surface)" stroke="var(--s3)" stroke-width="2"/>
+          <text x="70" y="165" text-anchor="middle" fill="var(--fg)">alumno-c · slot 3</text>
+        </g>
+        <g stroke="var(--muted)" stroke-width="1.5" fill="none">
+          <path d="M130 40 H170 V100 H190"/><path d="M130 100 H190"/><path d="M130 160 H170 V100 H190"/>
+        </g>
+        <!-- plugin -->
+        <rect x="190" y="70" width="130" height="60" rx="6" fill="var(--code-bg)" stroke="var(--line)"/>
+        <text x="255" y="95" text-anchor="middle" font-size="12" fill="var(--fg)">device plugin</text>
+        <text x="255" y="114" text-anchor="middle" font-size="11" fill="var(--muted)">nvidia.com/gpu: 3</text>
+        <path d="M320 100 H350" stroke="var(--muted)" stroke-width="1.5"/>
+        <!-- GPU -->
+        <rect x="350" y="10" width="280" height="190" rx="8" fill="var(--surface)" stroke="var(--fg)" stroke-width="1.5"/>
+        <text x="364" y="32" font-size="13" font-weight="500" fill="var(--fg)">RTX 3090 · knode11</text>
+        <text x="364" y="58" font-size="11" fill="var(--muted)">cómputo: turnos de CUDA</text>
+        <g>
+          <rect x="364" y="66" width="36" height="22" fill="var(--s1)"/><rect x="400" y="66" width="36" height="22" fill="var(--s2)"/>
+          <rect x="436" y="66" width="36" height="22" fill="var(--s3)"/><rect x="472" y="66" width="36" height="22" fill="var(--s1)"/>
+          <rect x="508" y="66" width="36" height="22" fill="var(--s2)"/><rect x="544" y="66" width="36" height="22" fill="var(--s3)"/>
+          <rect x="580" y="66" width="36" height="22" fill="var(--s1)"/>
+        </g>
+        <text x="616" y="102" text-anchor="end" font-size="10" fill="var(--muted)">tiempo →</text>
+        <text x="364" y="128" font-size="11" fill="var(--muted)">VRAM: 24 GB compartidos, sin límite por slot</text>
+        <rect x="364" y="136" width="252" height="22" rx="3" fill="var(--code-bg)" stroke="var(--line)"/>
+        <rect x="364" y="136" width="70" height="22" fill="var(--s1)" opacity=".85"/>
+        <rect x="434" y="136" width="40" height="22" fill="var(--s2)" opacity=".85"/>
+        <rect x="474" y="136" width="95" height="22" fill="var(--s3)" opacity=".85"/>
+        <text x="364" y="182" font-size="11" fill="var(--muted)">si uno llena la VRAM, los demás fallan con OOM</text>
+        <text x="10" y="232" font-size="11" fill="var(--muted)">Cada pod pide 1 réplica y ve la GPU entera en nvidia-smi.</text>
+      </svg>
+      <figcaption>El cómputo se reparte por turnos. La memoria no se reparte: es de todos.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Cómo está armado</h2>
+    <p>Hay dos piezas. Para que funcione tienen que estar activas las dos.</p>
+    <div class="grid2">
+      <div class="card">
+        <span class="eyebrow">Kubernetes</span>
+        <h3>El nodo anuncia 3 GPUs</h3>
+        <p>Un ConfigMap tiene la configuración <code>knode11-shared</code> con <code>replicas: 3</code>. Un sidecar del device plugin lee la label <code>nvidia.com/device-plugin.config</code> del nodo y recarga el plugin sin reiniciar nada.</p>
+        <p class="meta">k8s/51-nvidia-device-plugin-timeslicing.yaml</p>
+      </div>
+      <div class="card">
+        <span class="eyebrow">Portal</span>
+        <h3>El portal vende 3 ventanas</h3>
+        <p>Con <code>GPU_SLOTS="knode11=3"</code> el portal deja abrir hasta 3 ventanas a la vez en el nodo. Un lock por nodo evita que dos reservas se queden con el último slot.</p>
+        <p class="meta">app/slicing.py · k8s/40-portal.yaml</p>
+      </div>
+    </div>
+    <p>Un pod que pide más de una réplica se rechaza en la admisión (<code>failRequestsGreaterThanOne</code>), y cada namespace de alumno tiene una quota de 1 GPU. Nadie puede quedarse con la tarjeta entera desde el spec del pod.</p>
+  </section>
+
+  <section>
+    <h2>Qué ve el alumno</h2>
+    <div class="grid2">
+      <div class="card">
+        <h3>Un slot</h3>
+        <div class="price">0,817 <small>PC/h</small></div>
+        <p>Tarifa del nodo dividida por 3. En ofertas aparece «Ahora (2 de 3 slots libres)». Le tocan unos 8 GB de VRAM, sin garantía.</p>
+      </div>
+      <div class="card">
+        <h3>GPU completa</h3>
+        <div class="price">2,45 <small>PC/h</small></div>
+        <p>Toma los 3 slots al precio del nodo entero. Solo se puede si no hay nadie en ningún slot, y mientras dura nadie más entra.</p>
+      </div>
+    </div>
+    <p>En un nodo compartido se cobra el tiempo que se tuvo el slot, con un piso del 25 % del tiempo reservado. No se puede medir con DCGM porque DCGM ve la tarjeta, no el pod. Por el mismo motivo, la parada automática por inactividad está apagada en ese nodo.</p>
+  </section>
+
+  <section>
+    <h2>El flujo de un alquiler</h2>
+    <ol class="steps">
+      <li><div>El alumno alquila un slot (o un job toma uno; los jobs siempre usan 1).</div></li>
+      <li><div>El portal toma el lock del nodo y verifica que el pico de slots ocupados más el nuevo no pase de 3.</div></li>
+      <li><div>El reconciler le da quota de 1 GPU al namespace del alumno. Con el primer slot ocupado, el Ollama de knode11 se apaga.</div></li>
+      <li><div>El pod pide <code>nvidia.com/gpu: 1</code>, el scheduler le asigna una réplica y CUDA reparte el tiempo entre los procesos.</div></li>
+      <li><div>Al terminar, se libera el slot y se liquida con <code>metering = 'sliced'</code>. Cuando se libera el último slot, Ollama vuelve.</div></li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>¿Por qué solo la 3090?</h2>
+    <p>Es la única placa del clúster con VRAM suficiente para repartir: 24 GB dan unos 8 GB por slot, que alcanzan para un 7B cuantizado, un notebook de PyTorch o Stable Diffusion 1.5. En una placa de 4 GB, como la 1650, cada slot quedaría inútil. MIG, que sí aísla memoria, no existe en placas GeForce.</p>
+  </section>
+
+  <section>
+    <h2>Sumar otra placa</h2>
+    <ol class="steps">
+      <li><div>Agregar una configuración al ConfigMap y aplicarlo.
+<pre><code>knodeX-shared: |
+  version: v1
+  flags: { migStrategy: none }
+  sharing:
+    timeSlicing:
+      renameByDefault: false
+      failRequestsGreaterThanOne: true
+      resources:
+        - name: nvidia.com/gpu
+          replicas: 2</code></pre></div></li>
+      <li><div>Etiquetar el nodo.
+<pre><code>kubectl label node knodeX nvidia.com/device-plugin.config=knodeX-shared</code></pre></div></li>
+      <li><div>Ampliar la variable del portal y hacer rollout.
+<pre><code>GPU_SLOTS: "knode11=3,knodeX=2"</code></pre></div></li>
+    </ol>
+    <p>El orden importa. Para activar, primero la label y después la variable. Para volver atrás, al revés: primero se deja de vender slots, se espera que terminen las ventanas abiertas y recién entonces se quita la label.</p>
+  </section>
+
+  <section>
+    <h2>Cómo probarlo</h2>
+    <pre><code><span class="cmt"># tests unitarios y de manifiestos</span>
+pytest tests/test_gpu_slicing.py tests/test_gpu_slicing_manifests.py
+
+<span class="cmt"># en el clúster: el nodo debe anunciar 3</span>
+kubectl describe node knode11 | grep -A2 'nvidia.com/gpu'
+kubectl -n kube-system logs ds/nvidia-device-plugin -c config-manager
+
+<span class="cmt"># rollback</span>
+kubectl label node knode11 nvidia.com/device-plugin.config-</code></pre>
+    <ul>
+      <li>Tres alquileres de cuentas distintas conviven y ven la misma GPU (mismo UUID). Un cuarto queda Pending.</li>
+      <li>Una «GPU completa» con slots ocupados se rechaza.</li>
+      <li>Un OOM intencional en un pod hace fallar a los vecinos: sirve para ver qué le aparece al alumno.</li>
+      <li>En <code>settlement_metering</code> esas ventanas quedan con <code>metering = 'sliced'</code>.</li>
+    </ul>
+  </section>
+
+  <div class="warn">
+    <strong>Lo que time-slicing no da</strong>
+    No hay aislamiento de memoria ni de fallos: un error Xid reinicia los 3 slots. El cómputo tampoco está garantizado: tres entrenamientos pesados van a 1/3 cada uno. Si esto se vuelve un problema real, las alternativas son MPS o HAMi.
+  </div>
+</div>
+</body>
+</html>
