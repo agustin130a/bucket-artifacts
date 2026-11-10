@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tailscale en la práctica</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Una columna de lectura tipo documentación: secciones numeradas, comandos con botón de copiar, fuentes al final. */
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --fg: #16202a;
+  --muted: #5a6876;
+  --line: #dde3ea;
+  --accent: #1f6feb;
+  --ok: #1d7f5a;
+  --warn-bg: #fff4e5;
+  --warn-fg: #8a4b00;
+  --code-bg: #eef2f6;
+  --f-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f151c; --surface: #16202a; --fg: #e6edf3; --muted: #93a1b0; --line: #2a3644;
+    --accent: #5aa2ff; --ok: #4cc795; --warn-bg: #2e2312; --warn-fg: #f3c27a; --code-bg: #1d2935;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f151c; --surface: #16202a; --fg: #e6edf3; --muted: #93a1b0; --line: #2a3644;
+  --accent: #5aa2ff; --ok: #4cc795; --warn-bg: #2e2312; --warn-fg: #f3c27a; --code-bg: #1d2935;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.65 var(--f-body); }
+.wrap { max-width: 760px; margin: 0 auto; padding-block: 40px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 44px; }
+h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; line-height: 1.2; margin: 0; }
+h1 { font-size: clamp(1.9rem, 5vw, 2.6rem); }
+h2 { font-size: 1.35rem; display: flex; gap: 10px; align-items: baseline; }
+h2 .n { font: 500 .85rem var(--f-mono); color: var(--accent); }
+h3 { font-size: 1.02rem; font-family: var(--f-body); font-weight: 600; }
+p { margin: 0; }
+a { color: var(--accent); text-underline-offset: 2px; }
+section { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+header { display: flex; flex-direction: column; gap: 12px; }
+.eyebrow { font: 500 .75rem var(--f-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.lead { font-size: 1.1rem; color: var(--muted); max-width: 62ch; }
+.meta { font: .8rem var(--f-mono); color: var(--muted); }
+code { font: .88em var(--f-mono); background: var(--code-bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+ul, ol { margin: 0; padding-left: 1.25em; display: flex; flex-direction: column; gap: 6px; }
+dl { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+dt { font-weight: 600; }
+dd { margin: 2px 0 0; color: var(--fg); }
+.cmd { position: relative; min-width: 0; }
+pre { margin: 0; background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; padding-right: 76px;
+  overflow-x: auto; font: .82rem/1.6 var(--f-mono); }
+pre code { background: none; padding: 0; overflow-wrap: normal; }
+.cmt { color: var(--muted); }
+.copy { position: absolute; top: 8px; right: 8px; font: 500 .72rem var(--f-mono); color: var(--muted); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; cursor: pointer; }
+.copy:hover { color: var(--fg); border-color: var(--muted); }
+.copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.copy.done { color: var(--ok); border-color: var(--ok); }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.warn { background: var(--warn-bg); color: var(--warn-fg); border-radius: 10px; padding: 14px 16px; }
+.warn strong { display: block; margin-bottom: 4px; }
+.chain { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font: .82rem var(--f-mono); }
+.chain li { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; }
+.chain li.bad { border-color: var(--warn-fg); color: var(--warn-fg); }
+.chain .arr { border: 0; background: none; padding: 0; color: var(--muted); }
+.steps { counter-reset: s; list-style: none; padding: 0; gap: 12px; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 6px 10px; }
+.steps li::before { content: counter(s); grid-row: span 2; font: 600 .78rem var(--f-mono); width: 22px; height: 22px; border-radius: 50%;
+  background: var(--accent); color: var(--surface); display: grid; place-items: center; margin-top: 2px; }
+.check { list-style: none; padding: 0; gap: 10px; }
+.check li { display: grid; grid-template-columns: 20px 1fr; gap: 10px; }
+.check li::before { content: ""; width: 14px; height: 14px; margin-top: 5px; border: 2px solid var(--accent); border-radius: 3px; }
+.src { font-size: .9rem; overflow-wrap: anywhere; }
+footer { font-size: .85rem; color: var(--muted); border-top: 1px solid var(--line); padding-top: 16px; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <span class="eyebrow">InferHive · Red</span>
+    <h1>Tailscale en la práctica</h1>
+    <p class="lead">Lo necesario para operar nodos de un clúster k3s híbrido sobre Tailscale: control plane en la nube, nodos GPU en casa y uno de ellos dentro de WSL2 en una PC con Windows.</p>
+    <p class="meta">Lectura: 5 min · Verificado contra la documentación oficial y <code>tailscale</code> 1.104</p>
+  </header>
+
+  <section>
+    <h2><span class="n">01</span>Conceptos base</h2>
+    <p>Tailscale arma una red privada entre máquinas usando WireGuard, sin abrir puertos ni administrar un servidor VPN. Esa red se llama <strong>tailnet</strong> y cada máquina que se suma es un <strong>dispositivo</strong> (la consola los lista en <em>Machines</em>).</p>
+    <p>Cada dispositivo recibe una IP del rango <code>100.x.y.z</code> que <a href="https://tailscale.com/kb/1033/ip-and-dns-addresses">no cambia mientras siga registrado</a>, aunque la máquina se mueva de red. Si se lo borra del tailnet y vuelve a entrar, recibe otra. Para un nodo de k3s eso significa que la IP 100.x sirve como <code>--node-ip</code> estable.</p>
+    <p>Hay dos planos. El <a href="https://tailscale.com/kb/1508/control-data-planes">servicio de coordinación</a> maneja identidades, claves y políticas, pero no transporta tráfico: los paquetes viajan cifrados con WireGuard entre los dispositivos. Cuando no se logra una conexión directa (NAT estricto, firewalls), el tráfico pasa por un <a href="https://tailscale.com/kb/1232/derp-servers">servidor DERP</a>, un relay que reenvía paquetes ya cifrados; funciona, pero con más latencia.</p>
+    <p><a href="https://tailscale.com/kb/1081/magicdns">MagicDNS</a> registra un nombre DNS para cada dispositivo. Es cómodo en una laptop, pero en un nodo del clúster implica que Tailscale toma la configuración DNS del sistema. En este proyecto los nodos usan <code>--accept-dns=false</code> para que la resolución del host (y por lo tanto la de kubelet y los pods) no dependa de Tailscale; es una decisión del proyecto, no una regla de la documentación, que presenta esa opción como forma de dejar de aceptar el DNS del tailnet en un dispositivo.</p>
+  </section>
+
+  <section>
+    <h2><span class="n">02</span>Dos formas de sumar una máquina</h2>
+    <div class="grid2">
+      <div class="card">
+        <h3>Login interactivo</h3>
+        <p><code>tailscale up</code> sin key <a href="https://github.com/tailscale/tailscale/blob/main/cmd/tailscale/cli/up.go">imprime una URL</a> (“To authenticate, visit:”). La máquina entra al tailnet de la cuenta que abre y aprueba esa URL. Si la abre alguien con otra cuenta, el dispositivo termina en <a href="https://tailscale.com/kb/1017/install">otro tailnet</a>.</p>
+      </div>
+      <div class="card">
+        <h3>Auth key</h3>
+        <p>Se pasa una <a href="https://tailscale.com/kb/1085/auth-keys">auth key</a> generada en la consola y la máquina se autentica sola, sin que nadie abra un navegador. Es la opción para servidores, scripts y nodos remotos.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">03</span>Auth keys</h2>
+    <p>Al crear una key en la página <em>Keys</em> de la consola se eligen sus atributos (<a href="https://tailscale.com/kb/1085/auth-keys">fuente</a>):</p>
+    <dl>
+      <div><dt>One-off o reusable</dt><dd>Una key one-off conecta un solo dispositivo. Una reusable conecta todos los que se quiera hasta que vence o se revoca, por eso es la más delicada si se filtra.</dd></div>
+      <div><dt>Ephemeral</dt><dd>El dispositivo se <a href="https://tailscale.com/kb/1111/ephemeral-nodes">borra solo</a> tras un rato sin actividad (hoy, entre 30 y 60 minutos). Ideal para CI o contenedores; mala idea para un nodo, que desaparecería del tailnet después de un apagón.</dd></div>
+      <div><dt>Pre-approved</dt><dd>Si el tailnet tiene <a href="https://tailscale.com/kb/1099/device-approval">aprobación de dispositivos</a>, la máquina queda aprobada al entrar.</dd></div>
+      <div><dt>Tags</dt><dd>El dispositivo toma la identidad de los tags de la key en lugar de la de una persona.</dd></div>
+    </dl>
+    <p>Hay dos vencimientos distintos. La <strong>key</strong> vence entre 1 y 90 días después de creada (90 si no se indica). La <strong>clave del dispositivo</strong> (node key) <a href="https://tailscale.com/kb/1028/key-expiry">expira por defecto a los 180 días</a> y obliga a reautenticar; la expiración se desactiva por máquina con <em>Disable key expiry</em> en <em>Machines</em>. Que venza o se revoque la key <a href="https://tailscale.com/kb/1085/auth-keys">no desautoriza</a> a los dispositivos que ya entraron con ella.</p>
+    <p>Las keys empiezan con <code>tskey-auth</code> y el secreto <a href="https://tailscale.com/kb/1252/key-secret-management">se muestra completo una sola vez</a>: hay que guardarlo en un gestor de secretos en ese momento. La página <em>Keys</em> sigue listando las keys activas y las revocadas o vencidas recientes. Tratarla como una contraseña: si se pasa directo en la línea de comandos, <a href="https://tailscale.com/docs/features/access-control/auth-keys/how-to/secure-auth-keys">puede quedar en el historial de la shell</a>.</p>
+  </section>
+
+  <section>
+    <h2><span class="n">04</span>Tags y tagOwners</h2>
+    <p>Los <a href="https://tailscale.com/kb/1068/tags">tags</a> identifican máquinas que no son de una persona, como servidores. Un dispositivo con tag deja de pertenecer a la cuenta que lo dio de alta (tiene tags o usuario, no ambos), así que no se cae si esa persona se va, y su expiración de clave queda desactivada por defecto.</p>
+    <p>Antes de usar un tag hay que declararlo en <a href="https://tailscale.com/kb/1337/policy-syntax"><code>tagOwners</code></a> del archivo de política. Después se asigna con una key que lo trae o desde <em>Machines</em>, con la opción <em>Edit tags</em> del menú del dispositivo.</p>
+    <div class="cmd"><pre><code><span class="cmt">// archivo de política del tailnet (fragmento)</span>
+"tagOwners": {
+  "tag:k3s-node": ["autogroup:admin"]
+}</code></pre></div>
+    <p>Recomendación: dos keys separadas. Una para nodos (reusable, no efímera, preaprobada, con <code>tag:k3s-node</code>) y otra para laptops, sin tag y con vencimiento corto.</p>
+  </section>
+
+  <section>
+    <h2><span class="n">05</span>Roles de usuario</h2>
+    <p>Resumen de <a href="https://tailscale.com/kb/1138/user-roles">User roles</a>:</p>
+    <ul>
+      <li><strong>Member</strong>: usa la red según la política, pero no entra a la consola; no aprueba, no borra, no toca expiraciones.</li>
+      <li><strong>Admin</strong>: puede hacer cualquier acción de la consola.</li>
+      <li><strong>IT admin</strong>: administra usuarios y máquinas; puede aprobar, renombrar y borrar dispositivos.</li>
+      <li><strong>Network admin</strong>: administra la configuración de red; puede aplicar cualquier tag.</li>
+    </ul>
+    <p>Generar auth keys requiere ser Owner, Admin, IT admin o Network admin, <a href="https://tailscale.com/kb/1085/auth-keys">según la página de auth keys</a>. La documentación no detalla qué rol puede desactivar la expiración; como es una acción de la consola, un Member no puede.</p>
+  </section>
+
+  <section>
+    <h2><span class="n">06</span>Comandos útiles</h2>
+    <p>Referencia: <a href="https://tailscale.com/kb/1080/cli">CLI de Tailscale</a>; los flags de <code>up</code> que no figuran ahí están en <a href="https://github.com/tailscale/tailscale/blob/main/cmd/tailscale/cli/up.go">el código de <code>up</code></a>.</p>
+    <div class="cmd"><pre><code><span class="cmt"># Conectar un nodo con key, nombre fijo y sin DNS de Tailscale</span>
+sudo tailscale up --auth-key=file:/ruta/a/la-key --hostname=gpu-node-01 --accept-dns=false
+<span class="cmt"># --auth-key=file:...  lee la key de un archivo (no aparece en ps ni en el historial)</span>
+<span class="cmt"># --reset              vuelve a su valor por defecto todo flag no indicado</span>
+<span class="cmt"># --timeout=60s        no esperar para siempre a que tailscaled quede Running</span></code></pre></div>
+    <div class="cmd"><pre><code>tailscale status                      <span class="cmt"># estado propio y de los peers</span>
+tailscale status --self --peers=false <span class="cmt"># solo esta máquina</span>
+tailscale ip -4                       <span class="cmt"># la IP 100.x de esta máquina</span>
+tailscale ping control-plane          <span class="cmt"># ping por Tailscale; dice si fue directo o por DERP</span>
+tailscale netcheck                    <span class="cmt"># diagnóstico de la red física local</span>
+tailscale whois 100.64.0.1            <span class="cmt"># qué máquina y usuario tienen esa IP</span>
+sudo tailscale set --accept-dns=false <span class="cmt"># cambia una sola preferencia, sin repetir las demás</span>
+tailscale file cp informe.txt gpu-node-01:  <span class="cmt"># enviar un archivo a otro dispositivo</span></code></pre></div>
+    <p><code>tailscale down</code> desconecta pero conserva el login: un <code>up</code> posterior reconecta sin key. <code>tailscale logout</code> desconecta e <a href="https://tailscale.com/kb/1080/cli">invalida el login</a>, así que el próximo <code>up</code> pide autenticar de nuevo (y en un nodo efímero lo borra en el acto).</p>
+    <h3>Pegar una key sin dejar rastro</h3>
+    <p>Correr las líneas <strong>de a una</strong>. Si se pegan juntas, <code>read</code> toma la línea siguiente como si fuera la key.</p>
+    <ol class="steps">
+      <li><span>Leer la key sin mostrarla; pegarla y pulsar Enter:</span><div class="cmd"><pre><code>read -rs TSKEY</code></pre></div></li>
+      <li><span>Comprobar que se cargó (el largo, no el valor; 0 significa que no entró):</span><div class="cmd"><pre><code>echo ${#TSKEY}</code></pre></div></li>
+      <li><span>Conectar:</span><div class="cmd"><pre><code>sudo tailscale up --auth-key="$TSKEY" --hostname=gpu-node-01 --accept-dns=false</code></pre></div></li>
+      <li><span>Borrar la variable:</span><div class="cmd"><pre><code>unset TSKEY</code></pre></div></li>
+    </ol>
+  </section>
+
+  <section>
+    <h2><span class="n">07</span>Caso real: un nodo en NotReady durante días</h2>
+    <p>Un nodo GPU del clúster pasó a <code>NotReady</code> y después a <code>Unknown</code>, y quedó así varios días. Conviene diagnosticar en cadena, de abajo hacia arriba, porque cada eslabón depende del anterior:</p>
+    <ol class="chain" aria-label="Cadena de diagnóstico">
+      <li>distro / servicio corriendo</li><li class="arr" aria-hidden="true">→</li>
+      <li class="bad">Tailscale logueado</li><li class="arr" aria-hidden="true">→</li>
+      <li>k3s-agent conecta</li><li class="arr" aria-hidden="true">→</li>
+      <li>nodo Ready</li>
+    </ol>
+    <p>La máquina estaba encendida, pero <code>tailscale status</code> mostraba <code>Logged out</code>, y el log de k3s-agent repetía <code>failed to get CA certs … context deadline exceeded</code>: el agente no llegaba al control plane porque la ruta hacia él era la IP 100.x.</p>
+    <div class="cmd"><pre><code>tailscale status --self --peers=false
+journalctl -u k3s-agent -n 50 --no-pager
+kubectl get nodes -o wide</code></pre></div>
+    <p>Se resolvió volviendo a loguear con una auth key pasada como archivo temporal (<code>--auth-key=file:</code>) y borrando el archivo después. El nodo conservó su IP 100.x, lo esperable porque <a href="https://tailscale.com/kb/1033/ip-and-dns-addresses">seguía registrado</a>, y k3s-agent volvió a conectar sin más cambios.</p>
+    <div class="cmd"><pre><code>umask 077; read -rs TSKEY; printf '%s' "$TSKEY" > /tmp/ts.key; unset TSKEY
+sudo tailscale up --auth-key=file:/tmp/ts.key --hostname=gpu-node-01 --accept-dns=false
+shred -u /tmp/ts.key</code></pre></div>
+    <p>Lecciones:</p>
+    <ul>
+      <li>En nodos, desactivar la expiración de clave o, mejor, darlos de alta con tag, que la desactiva por defecto.</li>
+      <li>En este clúster, k3s anuncia la IP 100.x como <code>--node-ip</code> y flannel usa <code>tailscale0</code> vía <a href="https://docs.k3s.io/cli/agent"><code>--flannel-iface</code></a>. Por eso, en el nodo WSL2, Tailscale corre dentro de la distro: la interfaz tiene que existir ahí, y el cliente de Windows no la crea dentro de WSL2.</li>
+    </ul>
+    <div class="warn">
+      <strong>Ojo con WSL2</strong>
+      La documentación oficial <a href="https://tailscale.com/kb/1295/install-windows-wsl2">recomienda correr Tailscale solo en el host Windows</a>, no dentro de WSL2. Si se instala dentro, <code>tailscaled</code> sube el MTU de la interfaz por defecto de 1280 a 1340 para poder funcionar, y no hay que tener Tailscale activo en Windows y en WSL2 a la vez: el tráfico de WSL2 que pase por el Tailscale de Windows deja de funcionar. Aquí se elige la variante dentro de la distro a conciencia, por el requisito de k3s.
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">08</span>Checklist para dejar un nodo bien</h2>
+    <ul class="check">
+      <li><span>Alta con la key de nodos: reusable, no efímera, preaprobada, con <code>tag:k3s-node</code>.</span></li>
+      <li><span>Expiración de clave desactivada (verificar en <em>Machines</em>).</span></li>
+      <li><span><code>--hostname</code> fijo y <code>--accept-dns=false</code>.</span></li>
+      <li><span>Key pasada por <code>file:</code> o <code>read -rs</code>, nunca escrita en la línea de comandos.</span></li>
+      <li><span><code>tailscale ping control-plane</code> responde, idealmente en directo y no por DERP.</span></li>
+      <li><span><code>kubectl get nodes -o wide</code> muestra el nodo Ready con su IP 100.x.</span></li>
+    </ul>
+  </section>
+
+  <section class="src">
+    <h2><span class="n">—</span>Fuentes</h2>
+    <ul>
+      <li><a href="https://tailscale.com/kb/1080/cli">Tailscale CLI</a></li>
+      <li><a href="https://github.com/tailscale/tailscale/blob/main/cmd/tailscale/cli/up.go">Código de <code>tailscale up</code> (flags <code>--auth-key</code>, <code>--reset</code>, <code>--timeout</code>)</a></li>
+      <li><a href="https://tailscale.com/kb/1085/auth-keys">Auth keys</a></li>
+      <li><a href="https://tailscale.com/kb/1252/key-secret-management">Key and secret management</a></li>
+      <li><a href="https://tailscale.com/docs/features/access-control/auth-keys/how-to/secure-auth-keys">Securely handle an auth key</a></li>
+      <li><a href="https://tailscale.com/kb/1111/ephemeral-nodes">Ephemeral nodes</a></li>
+      <li><a href="https://tailscale.com/kb/1068/tags">Tags</a></li>
+      <li><a href="https://tailscale.com/kb/1337/policy-syntax">Policy file syntax (tagOwners)</a></li>
+      <li><a href="https://tailscale.com/kb/1028/key-expiry">Key expiry</a></li>
+      <li><a href="https://tailscale.com/kb/1099/device-approval">Device approval</a></li>
+      <li><a href="https://tailscale.com/kb/1138/user-roles">User roles</a></li>
+      <li><a href="https://tailscale.com/kb/1033/ip-and-dns-addresses">How Tailscale assigns IP addresses</a></li>
+      <li><a href="https://tailscale.com/kb/1508/control-data-planes">Control and data planes</a></li>
+      <li><a href="https://tailscale.com/kb/1232/derp-servers">DERP servers</a></li>
+      <li><a href="https://tailscale.com/kb/1081/magicdns">MagicDNS</a></li>
+      <li><a href="https://tailscale.com/kb/1017/install">Quickstart / instalación</a></li>
+      <li><a href="https://tailscale.com/kb/1295/install-windows-wsl2">Install Tailscale on Windows with WSL 2</a></li>
+      <li><a href="https://docs.k3s.io/cli/agent">K3s: flags de <code>k3s agent</code></a></li>
+    </ul>
+  </section>
+
+  <footer>Revisado en noviembre de 2026. Los ejemplos usan nombres e IPs genéricos.</footer>
+</div>
+
+<script>
+document.querySelectorAll('.cmd pre').forEach(function (pre) {
+  var btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'copy';
+  btn.textContent = 'Copiar';
+  btn.setAttribute('aria-label', 'Copiar comandos');
+  btn.addEventListener('click', function () {
+    var text = Array.prototype.map.call(pre.querySelector('code').childNodes, function (n) {
+      return n.nodeType === 1 && n.classList.contains('cmt') ? '' : n.textContent;
+    }).join('').replace(/[ \t]+$/gm, '').replace(/\n{2,}/g, '\n').trim();
+    function ok() { btn.textContent = 'Copiado'; btn.classList.add('done');
+      setTimeout(function () { btn.textContent = 'Copiar'; btn.classList.remove('done'); }, 1500); }
+    function selectFallback() {
+      try { var r = document.createRange(); r.selectNodeContents(pre); var s = window.getSelection();
+        s.removeAllRanges(); s.addRange(r); btn.textContent = 'Ctrl+C'; } catch (e) {}
+    }
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(ok, selectFallback);
+      } else { selectFallback(); }
+    } catch (e) { selectFallback(); }
+  });
+  pre.parentNode.appendChild(btn);
+});
+</script>
+</body>
+</html>
