@@ -1,0 +1,1064 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Qué certificados genera kubeadm, dónde viven, cómo se presentan y validan en cada conexión, cómo rotarlos y una alerta en Grafana para enterarte un mes antes.">
+<title>Certificados de kubeadm</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+body { margin: 0; }
+
+/* Layout: masthead + índice lateral fijo + columna de lectura, igual que el resto de la serie.
+   Color: el ámbar es el color de "vence en un año" en todos los diagramas; el resto, neutros fríos. */
+:root {
+  --bg: #f3f5f7; --surface: #ffffff; --surface-2: #e8ecf0; --plate: #ffffff;
+  --ink: #131b22; --ink-soft: #43505b; --ink-faint: #707d88; --line: #cfd7de;
+  --accent: #c27a06; --accent-strong: #8a5200; --accent-soft: #fbedd5;
+  --wire: #8995a0; --hot: #d48506;
+  --renew-bg: #fff3dc; --renew-bd: #d98a00; --renew-fg: #6b4200;
+  --ca-bg: #f0ebff; --ca-bd: #7656d6; --ca-fg: #3b2689;
+  --rota-bg: #e3f5ea; --rota-bd: #2f9e5b; --rota-fg: #1b5e37;
+  --token-bg: #e2f3f8; --token-bd: #2f8fa8; --token-fg: #154f5e;
+  --quieto-bg: #eef1f4; --quieto-bd: #98a3ae; --quieto-fg: #46505a;
+  --code-bg: #0f171d; --code-ink: #dbe7ee; --code-faint: #7a8c97;
+  --shadow: 0 1px 2px rgba(15,23,30,.06), 0 10px 24px -14px rgba(15,23,30,.25);
+  --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0c1216; --surface: #131b21; --surface-2: #1a242b; --plate: #ffffff;
+  --ink: #e4ebf0; --ink-soft: #a8b5bf; --ink-faint: #75838d; --line: #25313a;
+  --accent: #f0a83a; --accent-strong: #f6c070; --accent-soft: #33240d;
+  --wire: #6d7a85; --hot: #f0a83a;
+  --renew-bg: #3a2a0f; --renew-bd: #c98a22; --renew-fg: #f6d8a4;
+  --ca-bg: #251e44; --ca-bd: #8b74e0; --ca-fg: #d8ceff;
+  --rota-bg: #10301e; --rota-bd: #3fae6c; --rota-fg: #b4ebc8;
+  --token-bg: #0e2a33; --token-bd: #3a9fb8; --token-fg: #b3e5f1;
+  --quieto-bg: #1e262c; --quieto-bd: #66737e; --quieto-fg: #c2cbd2;
+  --code-bg: #070c10; --code-ink: #d6e5ee; --code-faint: #66798a;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 14px 30px -16px rgba(0,0,0,.6);
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #0c1216; --surface: #131b21; --surface-2: #1a242b; --plate: #ffffff;
+  --ink: #e4ebf0; --ink-soft: #a8b5bf; --ink-faint: #75838d; --line: #25313a;
+  --accent: #f0a83a; --accent-strong: #f6c070; --accent-soft: #33240d;
+  --wire: #6d7a85; --hot: #f0a83a;
+  --renew-bg: #3a2a0f; --renew-bd: #c98a22; --renew-fg: #f6d8a4;
+  --ca-bg: #251e44; --ca-bd: #8b74e0; --ca-fg: #d8ceff;
+  --rota-bg: #10301e; --rota-bd: #3fae6c; --rota-fg: #b4ebc8;
+  --token-bg: #0e2a33; --token-bd: #3a9fb8; --token-fg: #b3e5f1;
+  --quieto-bg: #1e262c; --quieto-bd: #66737e; --quieto-fg: #c2cbd2;
+  --code-bg: #070c10; --code-ink: #d6e5ee; --code-faint: #66798a;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 14px 30px -16px rgba(0,0,0,.6);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--serif); font-size: 17px; line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+a { color: var(--accent-strong); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+h1, h2, h3 { font-family: var(--mono); font-weight: 600; text-wrap: balance; letter-spacing: -0.01em; color: var(--ink); }
+code { font-family: var(--mono); font-size: 0.86em; background: var(--surface-2); padding: 0.08em 0.38em; border-radius: 4px; overflow-wrap: anywhere; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.masthead { max-width: 1180px; margin: 0 auto; padding-block: 3rem 2.2rem; border-bottom: 1px solid var(--line); }
+.eyebrow { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--accent-strong); display: flex; align-items: center; gap: 0.55rem; margin-bottom: 1rem; }
+.eyebrow::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft); }
+.masthead h1 { font-size: clamp(1.9rem, 4.2vw, 3rem); line-height: 1.07; margin: 0 0 0.9rem; max-width: 22ch; }
+.dek { font-size: 1.12rem; color: var(--ink-soft); max-width: 64ch; margin: 0 0 1.4rem; }
+.meta-row { display: flex; flex-wrap: wrap; gap: 0.4rem 1.6rem; font-family: var(--mono); font-size: 0.78rem; color: var(--ink-faint); }
+.meta-row strong { color: var(--ink-soft); font-weight: 600; }
+
+.layout { max-width: 1180px; margin: 0 auto; padding-block: 2.4rem 4rem;
+  display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 3rem; align-items: start; }
+nav.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 1.5rem); display: flex; flex-direction: column;
+  gap: 0.1rem; font-family: var(--mono); font-size: 0.8rem; }
+nav.toc .toc-label { font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 0.5rem; }
+nav.toc a { color: var(--ink-soft); text-decoration: none; padding: 0.35rem 0 0.35rem 0.7rem; border-left: 2px solid var(--line); }
+nav.toc a:hover { color: var(--accent-strong); border-color: var(--accent); }
+article { min-width: 0; }
+section { padding-bottom: 2.6rem; scroll-margin-top: 1.2rem; }
+section + section { border-top: 1px solid var(--line); padding-top: 2.6rem; }
+h2 { font-size: 1.45rem; margin: 0 0 1rem; }
+h3 { font-size: 1.02rem; margin: 1.8rem 0 0.6rem; }
+p, ul, ol { max-width: 68ch; }
+p { margin: 0 0 1.05rem; }
+ul, ol { padding-left: 1.3rem; margin: 0 0 1.2rem; }
+li { margin-bottom: 0.4rem; }
+blockquote { margin: 0 0 1.2rem; padding: 0.7rem 1rem; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 8px 8px 0; }
+
+.codeblock { background: var(--code-bg); border-radius: 10px; box-shadow: var(--shadow); margin: 1rem 0 1.5rem; max-width: 78ch; overflow: hidden; }
+.codeblock__label { font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--code-faint); padding: 0.55rem 1rem 0; }
+.codeblock pre { margin: 0; padding: 0.55rem 1.1rem 1rem; overflow-x: auto; }
+.codeblock code { background: none; padding: 0; font-size: 0.82rem; line-height: 1.65; color: var(--code-ink); white-space: pre; overflow-wrap: normal; }
+
+.table-wrap { overflow-x: auto; margin: 1rem 0 1.6rem; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; line-height: 1.45; }
+th, td { text-align: left; vertical-align: top; padding: 0.6rem 0.8rem; border-bottom: 1px solid var(--line); }
+th { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); font-weight: 600; background: var(--surface-2); }
+tr:last-child td { border-bottom: 0; }
+td code { white-space: nowrap; }
+
+figure { margin: 1.4rem 0 1.8rem; }
+figcaption { font-size: 0.88rem; color: var(--ink-faint); margin-top: 0.6rem; max-width: 72ch; }
+.plate > svg { display: block; width: 100%; height: auto; background: var(--plate); border-radius: 12px; border: 1px solid var(--line); }
+
+/* Mapa de conexiones */
+.map__scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.map svg { display: block; width: 100%; min-width: 640px; height: auto; font-family: var(--mono); }
+.m-region { fill: var(--surface-2); stroke: var(--line); stroke-width: 1.2; }
+.m-region-t { fill: var(--ink-faint); font-size: 11px; letter-spacing: 0.12em; }
+.m-box { fill: var(--surface); stroke: var(--ink-faint); stroke-width: 1.2; }
+.m-box--main { stroke: var(--ink); stroke-width: 1.6; }
+.m-box--ghost { fill: none; stroke-dasharray: 4 3; }
+.m-pill { fill: var(--surface); stroke: var(--hot); stroke-width: 1.4; }
+.m-t { fill: var(--ink); font-size: 13px; }
+.m-t--b { font-weight: 700; font-size: 14px; }
+.m-s { fill: var(--ink-faint); font-size: 11px; }
+.m-s--b { fill: var(--ink-soft); font-weight: 600; }
+.m-edge { stroke: var(--wire); stroke-width: 1.8; fill: none; }
+.m-edge--hot { stroke: var(--hot); stroke-width: 2.4; }
+.m-edge--dash { stroke-dasharray: 5 4; }
+.mk { fill: var(--wire); }
+.mk-hot { fill: var(--hot); }
+.m-badge circle { fill: var(--surface); stroke: var(--wire); stroke-width: 1.6; }
+.m-badge text { fill: var(--ink); font-size: 12px; font-weight: 700; }
+.m-badge--hot circle { stroke: var(--hot); fill: var(--accent-soft); }
+
+/* Chips */
+.chip { display: inline-block; font-family: var(--mono); font-size: 0.78rem; line-height: 1.3; padding: 0.18rem 0.5rem;
+  border-radius: 6px; border: 1px solid; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+.chip--renew { background: var(--renew-bg); border-color: var(--renew-bd); color: var(--renew-fg); }
+.chip--ca { background: var(--ca-bg); border-color: var(--ca-bd); color: var(--ca-fg); }
+.chip--rota { background: var(--rota-bg); border-color: var(--rota-bd); color: var(--rota-fg); }
+.chip--token { background: var(--token-bg); border-color: var(--token-bd); color: var(--token-fg); }
+.chip--quieto { background: var(--quieto-bg); border-color: var(--quieto-bd); color: var(--quieto-fg); }
+.chip--neutral, .chip--flag { background: var(--surface); border-color: var(--line); color: var(--ink); }
+.chip--none { background: transparent; border: 1px dashed var(--quieto-bd); color: var(--quieto-fg); }
+
+.legend { display: flex; flex-wrap: wrap; gap: 0.5rem 1.3rem; font-size: 0.86rem; color: var(--ink-soft); margin: 0.2rem 0 1.4rem; }
+.legend > span { display: inline-flex; align-items: center; gap: 0.45rem; }
+
+/* Tarjetas de flujo */
+.flows { display: grid; gap: 1rem; }
+.flow { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem 0.9rem; scroll-margin-top: 1.2rem; }
+.flow--hot { border-color: var(--hot); }
+.flow__head { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; margin-bottom: 0.8rem; }
+.flow__head h3 { margin: 0; font-size: 0.98rem; }
+.flow__no { font-family: var(--mono); font-weight: 700; font-size: 0.82rem; width: 1.7rem; height: 1.7rem; border-radius: 50%;
+  display: inline-grid; place-items: center; border: 1.5px solid var(--wire); color: var(--ink); flex: none; }
+.flow--hot .flow__no { border-color: var(--hot); background: var(--accent-soft); }
+.flow__tag { font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent-strong);
+  border: 1px solid var(--hot); border-radius: 999px; padding: 0.1rem 0.55rem; }
+.flow__actors, .step { display: grid; grid-template-columns: minmax(0, 1fr) minmax(7rem, 0.8fr) minmax(0, 1fr); gap: 0.8rem; align-items: center; }
+.actor { font-family: var(--mono); font-weight: 600; font-size: 0.84rem; color: var(--ink); padding-bottom: 0.4rem; border-bottom: 2px solid var(--line); }
+.actor small { display: block; font-weight: 400; color: var(--ink-faint); font-size: 0.74rem; }
+.actor--server { text-align: right; }
+.step { padding: 0.65rem 0; border-bottom: 1px dashed var(--line); }
+.step:last-of-type { border-bottom: 0; }
+.side { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.45rem; font-size: 0.88rem; min-width: 0; }
+.side small { flex-basis: 100%; color: var(--ink-faint); font-family: var(--mono); font-size: 0.7rem; line-height: 1.35; overflow-wrap: anywhere; }
+.side--server { justify-content: flex-end; text-align: right; }
+.verb { color: var(--ink-soft); font-size: 0.82rem; font-style: italic; }
+.wire { position: relative; height: 2.2rem; display: grid; place-items: center; }
+.wire::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 2px solid var(--wire); }
+.wire::after { content: ""; position: absolute; top: calc(50% - 6px); left: -1px; border: 6px solid transparent; border-right: 9px solid var(--wire); border-left: 0; }
+.wire--right::after { left: auto; right: -1px; border-right: 0; border-left: 9px solid var(--wire); }
+.flow--hot .wire::before { border-top-color: var(--hot); }
+.flow--hot .wire::after { border-right-color: var(--hot); }
+.flow--hot .wire--right::after { border-right-color: transparent; border-left-color: var(--hot); }
+.wire__label { position: relative; background: var(--surface); padding: 0 0.4rem; font-family: var(--mono); font-size: 0.66rem;
+  color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.05em; text-align: center; line-height: 1.2; }
+.flow__expiry { margin: 0.7rem 0 0; font-size: 0.9rem; color: var(--ink-soft); max-width: none; }
+.flow__expiry b { color: var(--ink); }
+
+.end { max-width: 1180px; margin: 0 auto; padding-block: 1.6rem 3rem; border-top: 1px solid var(--line);
+  font-family: var(--mono); font-size: 0.8rem; color: var(--ink-faint); }
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: minmax(0, 1fr); gap: 1.6rem; }
+  nav.toc { position: static; flex-direction: row; flex-wrap: wrap; gap: 0.3rem 0.4rem; }
+  nav.toc .toc-label { flex-basis: 100%; }
+  nav.toc a { border: 1px solid var(--line); border-radius: 999px; padding: 0.2rem 0.6rem; font-size: 0.74rem; }
+}
+@media (max-width: 620px) {
+  body { font-size: 16px; }
+  .flow__actors { display: none; }
+  .step { grid-template-columns: minmax(0, 1fr); gap: 0.35rem; }
+  .side, .side--server { justify-content: flex-start; text-align: left; }
+  .side::before { content: attr(data-actor); flex-basis: 100%; font-family: var(--mono); font-weight: 600; font-size: 0.78rem; color: var(--ink); }
+  .step--to-client .side--server { order: 1; }
+  .step--to-client .wire { order: 2; }
+  .step--to-client .side--client { order: 3; }
+  .wire { height: 1.4rem; place-items: center start; }
+  .wire::before { left: 0.6rem; right: auto; top: 0; bottom: 0; border-top: 0; border-left: 2px solid var(--wire); }
+  .wire::after, .wire--right::after { left: calc(0.6rem - 5px); right: auto; top: auto; bottom: -2px;
+    border: 6px solid transparent; border-top: 8px solid var(--wire); border-bottom: 0; }
+  .flow--hot .wire::before { border-left-color: var(--hot); }
+  .flow--hot .wire::after, .flow--hot .wire--right::after { border-top-color: var(--hot); border-right-color: transparent; border-left-color: transparent; }
+  .wire__label { margin-left: 1.2rem; text-align: left; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+
+</head>
+<body>
+<header class="masthead">
+  <div class="eyebrow">kubeadm · certificados · on-premise</div>
+  <h1>Tu cluster kubeadm tiene fecha de vencimiento</h1>
+  <p class="dek">Qué certificados genera kubeadm, dónde viven, qué se rompe cuando vencen, cómo rotarlos y una alerta en Grafana para enterarte un mes antes y no la mañana en que dejan de crearse los pods.</p>
+  <div class="meta-row">
+    <span><strong>Kubernetes</strong> 1.33 con kubeadm</span>
+    <span><strong>Alertas</strong> Prometheus + Grafana</span>
+    <span><strong>Lectura</strong> ~21 min</span>
+    <span><a href="https://github.com/agustin130a/tech-articles/tree/main/kubeadm-cert-expiry" target="_blank" rel="noopener">Código y laboratorio</a></span>
+  </div>
+</header>
+
+<div class="layout">
+  <nav class="toc" aria-label="Contenido">
+    <span class="toc-label">Contenido</span>
+    <a href="#por-que-hay-tantos-certificados">Por qué hay tantos certificados</a>
+<a href="#control-plane-o-worker">¿Control plane o worker?</a>
+<a href="#como-se-presentan-y-se-validan">Cómo se presentan y se validan</a>
+<a href="#que-se-rompe-cuando-vencen">Qué se rompe cuando vencen</a>
+<a href="#como-rotarlos">Cómo rotarlos</a>
+<a href="#la-alerta">La alerta</a>
+<a href="#la-prueba">La prueba</a>
+<a href="#lo-que-nos-llevamos">Lo que nos llevamos</a>
+<a href="#fuentes">Fuentes</a>
+  </nav>
+  <article>
+    <section id="intro"><p>Un lunes a la mañana nadie podía administrar dos clusters on-premise: <code>kubectl</code> respondía con un error
+de certificado vencido. Los clusters se habían creado con kubeadm hacía poco más de un año. El primer
+diagnóstico fue el que haría casi cualquiera: <em>"se vencieron los certificados de acceso"</em>, un tema de
+credenciales de las personas. Se entró por SSH a uno de los control planes, se corrió
+<code>kubeadm certs renew all</code>, se reinició el apiserver, se tomó el <code>admin.conf</code> nuevo y el acceso volvió.</p>
+<p>A la tarde dejaron de crearse los runners de CI. Su autoscaler, que corre dentro del cluster, fallaba con
+<code>CERTIFICATE_VERIFY_FAILED: certificate has expired</code> contra <code>10.96.0.1:443</code>, la IP del Service
+<code>kubernetes</code>. Los nodos estaban <code>Ready</code> y los pods que ya corrían seguían corriendo, pero
+<code>kube-scheduler</code> y <code>kube-controller-manager</code> llenaban sus logs con <code>Unauthorized</code>.</p>
+<p>No era un tema de accesos. Los certificados que kubeadm genera al crear el cluster
+<a href="https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-certs/" target="_blank" rel="noopener">vencen al año</a>, todos a la
+vez, también los que usan los componentes para hablar entre sí. Y la renovación de la mañana tenía dos
+huecos:</p>
+<ul>
+<li><strong>Se hizo en uno solo de los tres control planes.</strong> Los otros dos seguían sirviendo el certificado
+  vencido, y el Service <code>kubernetes</code> reparte los pedidos entre los tres apiservers.</li>
+<li><strong>En ese nodo no se reiniciaron el scheduler ni el controller-manager</strong>, que seguían con el certificado
+  viejo cargado en memoria.</li>
+</ul>
+<p>Se resolvió repitiendo la renovación en cada control plane, de a uno, y reiniciando los static pods.
+Cuando todo volvió, el cliente pidió lo razonable: un aviso con tiempo, antes del día D.</p>
+<p>De ese día salen las ideas de este artículo: <strong>los certificados de kubeadm vencen</strong>, <strong>renovar en un nodo
+y en disco no alcanza</strong> y <strong>hace falta un aviso que llegue con margen</strong>. El resto es saber cuáles son,
+dónde están y cómo enterarte.</p>
+<p>El código y el laboratorio están en
+<a href="https://github.com/agustin130a/tech-articles/tree/main/kubeadm-cert-expiry" target="_blank" rel="noopener">github.com/agustin130a/tech-articles/kubeadm-cert-expiry</a>.</p>
+</section>
+<section id="por-que-hay-tantos-certificados"><h2>Por qué hay tantos certificados</h2>
+<p>En Kubernetes casi toda la comunicación entre componentes es TLS con autenticación mutua: el que atiende
+presenta un certificado de servidor y el que llama se identifica con un certificado de cliente. La
+documentación lo dice sin rodeos: <em>"Kubernetes requires PKI certificates for authentication over TLS"</em>
+(<a href="https://kubernetes.io/docs/setup/best-practices/certificates/" target="_blank" rel="noopener">PKI certificates and requirements</a>).</p>
+<p>kubeadm arma tres autoridades de certificación separadas, para que etcd, la API y el front-proxy no
+compartan raíz, y firma con ellas un certificado para cada conversación:</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Certificado</th>
+<th>Lo presenta</th>
+<th>Ante quién</th>
+<th>CA</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>apiserver</code></td>
+<td>kube-apiserver (servidor)</td>
+<td>kubectl, kubelets, controladores</td>
+<td><code>ca</code></td>
+</tr>
+<tr>
+<td><code>apiserver-kubelet-client</code></td>
+<td>kube-apiserver (cliente)</td>
+<td>kubelet (<code>logs</code>, <code>exec</code>, <code>port-forward</code>)</td>
+<td><code>ca</code></td>
+</tr>
+<tr>
+<td><code>apiserver-etcd-client</code></td>
+<td>kube-apiserver (cliente)</td>
+<td>etcd</td>
+<td><code>etcd-ca</code></td>
+</tr>
+<tr>
+<td><code>etcd-server</code>, <code>etcd-peer</code></td>
+<td>etcd</td>
+<td>apiserver y los otros miembros de etcd</td>
+<td><code>etcd-ca</code></td>
+</tr>
+<tr>
+<td><code>front-proxy-client</code></td>
+<td>kube-apiserver</td>
+<td>APIs agregadas (metrics-server)</td>
+<td><code>front-proxy-ca</code></td>
+</tr>
+<tr>
+<td><code>scheduler.conf</code>, <code>controller-manager.conf</code></td>
+<td>scheduler y controller-manager</td>
+<td>kube-apiserver</td>
+<td><code>ca</code></td>
+</tr>
+<tr>
+<td><code>admin.conf</code>, <code>super-admin.conf</code></td>
+<td>quien administra el cluster</td>
+<td>kube-apiserver</td>
+<td><code>ca</code></td>
+</tr>
+<tr>
+<td><code>kubelet-client-current.pem</code></td>
+<td>kubelet (cliente)</td>
+<td>kube-apiserver</td>
+<td><code>ca</code></td>
+</tr>
+<tr>
+<td><code>kubelet.crt</code></td>
+<td>kubelet (servidor)</td>
+<td>apiserver, metrics-server, Prometheus</td>
+<td>autofirmado</td>
+</tr>
+</tbody>
+</table></div>
+<p>Los <code>.conf</code> son kubeconfigs con el certificado de cliente embebido en base64. Las cuentas de servicio
+usan otro mecanismo: <code>sa.key</code> y <code>sa.pub</code> son un par de claves, no un certificado, y no vencen.</p>
+<h3>Qué problema evitan</h3>
+<p>Tres, y los tres importan más en un cluster on-premise, donde la red suele ser compartida:</p>
+<ul>
+<li><strong>Que alguien se haga pasar por un componente.</strong> El kubelet solo le habla al apiserver si este presenta
+  un certificado firmado por la CA del cluster, y etcd solo acepta a quien tenga un certificado de
+  <code>etcd-ca</code>. Sin eso, cualquier máquina en la red podría recibir los pedidos del kubelet o leer etcd, que
+  guarda todos los Secrets.</li>
+<li><strong>Que se lea el tráfico.</strong> Por la API viajan tokens, Secrets y la salida de <code>kubectl exec</code>; TLS la cifra.</li>
+<li><strong>Que se confunda quién es quién.</strong> El certificado de cliente <em>es</em> la identidad: <em>"the common name of
+  the subject is used as the user name for the request"</em> y la organización define los grupos
+  (<a href="https://kubernetes.io/docs/reference/access-authn-authz/authentication/#x509-client-certificates" target="_blank" rel="noopener">Authenticating</a>).
+  Por eso <code>scheduler.conf</code> dice <code>system:kube-scheduler</code> y RBAC le da exactamente los permisos del scheduler.</li>
+</ul>
+<p>Y como Kubernetes no permite revocar certificados (lo vemos más abajo), el vencimiento es lo único que
+acota cuánto sirve uno robado. Que venzan no es un defecto: es la parte del diseño que hay que operar.</p>
+<p>Por defecto, kubeadm firma los <em>leaf certificates</em> por un año y las CA por diez
+(<code>certificateValidityPeriod: 8760h</code> y <code>caCertificateValidityPeriod: 87600h</code> en la
+<a href="https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-certs/#choosing-cert-validity-period" target="_blank" rel="noopener">configuración de kubeadm</a>).</p>
+</section>
+<section id="control-plane-o-worker"><h2>¿Control plane o worker?</h2>
+<figure class="plate"><svg role="img" aria-label="Dónde vive cada certificado: en el control plane, /etc/kubernetes/pki con las CA y los certificados hoja, los kubeconfigs y los static pods; en el worker, solo la CA pública y los certificados del kubelet." xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 966"><rect width="1200" height="966" fill="#ffffff"/><text x="32" y="46" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="25" fill="#16202a" font-weight="800" text-anchor="start">Dónde vive cada certificado en un cluster kubeadm</text><text x="32" y="72" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="14" fill="#4a5662" font-weight="400" text-anchor="start">Valores por defecto de kubeadm. Cada control plane tiene su propia copia de todo lo de la izquierda.</text><rect x="32" y="96" width="776" height="654" rx="16" fill="#f7f8fa" stroke="#c3ccd5" stroke-width="1.5"/><text x="54" y="130" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="17" fill="#16202a" font-weight="800" text-anchor="start">CONTROL PLANE</text><text x="229.79999999999998" y="130" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="13" fill="#4a5662" font-weight="400" text-anchor="start">× 3 nodos</text><rect x="50" y="150" width="740" height="300" rx="12" fill="#ffffff" stroke="#cfd6dd" stroke-width="1.2"/><text x="68" y="180" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="14" fill="#16202a" font-weight="700" text-anchor="start">/etc/kubernetes/pki/</text><text x="68" y="212" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="13" fill="#16202a" font-weight="700" text-anchor="start">Autoridades (CA)</text><text x="68" y="230" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="12" fill="#7b8794" font-weight="400" text-anchor="start">10 años · kubeadm no las rota</text><rect x="68" y="244" width="226" height="26" rx="6" fill="#f0ebff" stroke="#7656d6" stroke-width="1.2"/><text x="78" y="261.5" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#3b2689" font-weight="400" text-anchor="start">ca.crt · ca.key</text><rect x="68" y="278" width="226" height="26" rx="6" fill="#f0ebff" stroke="#7656d6" stroke-width="1.2"/><text x="78" y="295.5" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#3b2689" font-weight="400" text-anchor="start">etcd/ca.crt · ca.key</text><rect x="68" y="312" width="226" height="26" rx="6" fill="#f0ebff" stroke="#7656d6" stroke-width="1.2"/><text x="78" y="329.5" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#3b2689" font-weight="400" text-anchor="start">front-proxy-ca.crt · .key</text><text x="312" y="212" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="13" fill="#16202a" font-weight="700" text-anchor="start">Certificados hoja</text><text x="312" y="230" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="12" fill="#7b8794" font-weight="400" text-anchor="start">1 año · kubeadm certs renew</text><rect x="312" y="244.0" width="258" height="26" rx="6" fill="#fff3dc" stroke="#d98a00" stroke-width="1.2"/><text x="322" y="261.5" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#6b4200" font-weight="400" text-anchor="start">apiserver.crt</text><rect x="312" y="272.5" width="258" height="26" rx="6" fill="#fff3dc" stroke="#d98a00" stroke-width="1.2"/><text x="322" y="290.0" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#6b4200" font-weight="400" text-anchor="start">apiserver-kubelet-client.crt</text><rect x="312" y="301.0" width="258" height="26" rx="6" fill="#fff3dc" stroke="#d98a00" stroke-width="1.2"/><text x="322" y="318.5" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#6b4200" font-weight="400" text-anchor="start">apiserver-etcd-client.crt</text><rect x="312" y="329.5" width="258" height="26" rx="6" fill="#fff3dc" stroke="#d98a00" stroke-width="1.2"/><text x="322" y="347.0" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#6b4200" font-weight="400" text-anchor="start">front-proxy-client.crt</text><rect x="312" y="358.0" width="258" height="26" rx="6" fill="#fff3dc" stroke="#d98a00" stroke-width="1.2"/><text x="322" y="375.5" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#6b4200" font-weight="400" text-anchor="start">etcd/server.crt</text><rect x="312" y="386.5" width="258" height="26" rx="6" fill="#fff3dc" stroke="#d98a00" stroke-width="1.2"/><text x="322" y="404.0" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#6b4200" font-weight="400" text-anchor="start">etcd/peer.crt</text><rect x="312" y="415.0" width="258" height="26" rx="6" fill="#fff3dc" stroke="#d98a00" stroke-width="1.2"/><text x="322" y="432.5" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#6b4200" font-weight="400" text-anchor="start">etcd/healthcheck-client.crt</text><text x="588" y="212" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="13" fill="#16202a" font-weight="700" text-anchor="start">ServiceAccounts</text><text x="588" y="230" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="12" fill="#7b8794" font-weight="400" text-anchor="start">par de claves, no vence</text><rect x="588" y="244" width="168" height="26" rx="6" fill="#eef1f4" stroke="#98a3ae" stroke-width="1.2"/><text x="598" y="261.5" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#46505a" font-weight="400" text-anchor="start">sa.key · sa.pub</text><rect x="50" y="464" width="740" height="104" rx="12" fill="#ffffff" stroke="#cfd6dd" stroke-width="1.2"/><text x="68" y="494" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="14" fill="#16202a" font-weight="700" text-anchor="start">/etc/kubernetes/*.conf</text><text x="270" y="494" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="12.5" fill="#7b8794" font-weight="400" text-anchor="start">kubeconfigs con el certificado embebido en base64</text><rect x="68" y="508" width="96" height="26" rx="6" fill="#fff3dc" stroke="#d98a00" stroke-width="1.2"/><text x="78" y="525.5" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#6b4200" font-weight="400" text-anchor="start">admin.conf</text><rect x="174" y="508" width="150" height="26" rx="6" fill="#fff3dc" stroke="#d98a00" stroke-width="1.2"/><text x="184" y="525.5" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#6b4200" font-weight="400" text-anchor="start">super-admin.conf*</text><rect x="334" y="508" width="195" height="26" rx="6" fill="#fff3dc" stroke="#d98a00" stroke-width="1.2"/><text x="344" y="525.5" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#6b4200" font-weight="400" text-anchor="start">controller-manager.conf</text><rect x="539" y="508" width="127" height="26" rx="6" fill="#fff3dc" stroke="#d98a00" stroke-width="1.2"/><text x="549" y="525.5" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#6b4200" font-weight="400" text-anchor="start">scheduler.conf</text><text x="68" y="554" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="12" fill="#7b8794" font-weight="400" text-anchor="start">1 año · kubeadm certs renew      * solo en el nodo donde se corrió kubeadm init</text><rect x="50" y="582" width="363.0" height="150" rx="12" fill="#ffffff" stroke="#cfd6dd" stroke-width="1.2"/><text x="68" y="612" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="14" fill="#16202a" font-weight="700" text-anchor="start">/etc/kubernetes/manifests/</text><rect x="68" y="626" width="130" height="26" rx="6" fill="#ffffff" stroke="#bcc5ce" stroke-width="1.2"/><text x="78" y="643.5" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#16202a" font-weight="400" text-anchor="start">kube-apiserver</text><rect x="208" y="626" width="192" height="26" rx="6" fill="#ffffff" stroke="#bcc5ce" stroke-width="1.2"/><text x="218" y="643.5" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#16202a" font-weight="400" text-anchor="start">kube-controller-manager</text><rect x="68" y="658" width="130" height="26" rx="6" fill="#ffffff" stroke="#bcc5ce" stroke-width="1.2"/><text x="78" y="675.5" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#16202a" font-weight="400" text-anchor="start">kube-scheduler</text><rect x="208" y="658" width="192" height="26" rx="6" fill="#ffffff" stroke="#bcc5ce" stroke-width="1.2"/><text x="218" y="675.5" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#16202a" font-weight="400" text-anchor="start">etcd</text><text x="68" y="704" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="12" fill="#7b8794" font-weight="400" text-anchor="start">Static pods: leen los certificados al arrancar.</text><text x="68" y="722" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="12.5" fill="#9a3412" font-weight="700" text-anchor="start">Tras renovar: reiniciarlos, de a un nodo.</text><rect x="427.0" y="582" width="363.0" height="150" rx="12" fill="#ffffff" stroke="#cfd6dd" stroke-width="1.2"/><text x="445.0" y="612" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="14" fill="#16202a" font-weight="700" text-anchor="start">/var/lib/kubelet/pki/</text><text x="638.0" y="612" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="12.5" fill="#7b8794" font-weight="400" text-anchor="start">igual que en el worker</text><rect x="445.0" y="626" width="218" height="26" rx="6" fill="#e3f5ea" stroke="#2f9e5b" stroke-width="1.2"/><text x="455.0" y="643.5" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#1b5e37" font-weight="400" text-anchor="start">kubelet-client-current.pem</text><rect x="445.0" y="658" width="104" height="26" rx="6" fill="#eef1f4" stroke="#98a3ae" stroke-width="1.2"/><text x="455.0" y="675.5" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#46505a" font-weight="400" text-anchor="start">kubelet.crt</text><text x="445.0" y="704" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="12" fill="#7b8794" font-weight="400" text-anchor="start">kubelet.conf apunta al primero.</text><text x="445.0" y="722" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="12" fill="#7b8794" font-weight="400" text-anchor="start">Existe en todos los nodos.</text><rect x="826" y="96" width="342" height="654" rx="16" fill="#f7f8fa" stroke="#c3ccd5" stroke-width="1.5"/><text x="848" y="130" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="17" fill="#16202a" font-weight="800" text-anchor="start">WORKER</text><text x="935.6" y="130" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="13" fill="#4a5662" font-weight="400" text-anchor="start">× N nodos</text><rect x="844" y="150" width="306" height="92" rx="12" fill="#ffffff" stroke="#cfd6dd" stroke-width="1.2"/><text x="862" y="180" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="14" fill="#16202a" font-weight="700" text-anchor="start">/etc/kubernetes/</text><rect x="862" y="196" width="96" height="26" rx="6" fill="#f0ebff" stroke="#7656d6" stroke-width="1.2"/><text x="872" y="213.5" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#3b2689" font-weight="400" text-anchor="start">pki/ca.crt</text><rect x="980" y="196" width="112" height="26" rx="6" fill="#ffffff" stroke="#bcc5ce" stroke-width="1.2"/><text x="990" y="213.5" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#16202a" font-weight="400" text-anchor="start">kubelet.conf</text><rect x="844" y="256" width="306" height="206" rx="12" fill="#ffffff" stroke="#cfd6dd" stroke-width="1.2"/><text x="862" y="286" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="14" fill="#16202a" font-weight="700" text-anchor="start">/var/lib/kubelet/pki/</text><rect x="862" y="302" width="218" height="26" rx="6" fill="#e3f5ea" stroke="#2f9e5b" stroke-width="1.2"/><text x="872" y="319.5" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#1b5e37" font-weight="400" text-anchor="start">kubelet-client-current.pem</text><text x="862" y="348" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="12.5" fill="#4a5662" font-weight="400" text-anchor="start">Cliente: el kubelet pide uno nuevo</text><text x="862" y="366" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="12.5" fill="#4a5662" font-weight="400" text-anchor="start">con 30 %–10 % de vida restante.</text><rect x="862" y="384" width="104" height="26" rx="6" fill="#eef1f4" stroke="#98a3ae" stroke-width="1.2"/><text x="872" y="401.5" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#46505a" font-weight="400" text-anchor="start">kubelet.crt</text><text x="862" y="430" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="12.5" fill="#4a5662" font-weight="400" text-anchor="start">Serving autofirmado: 1 año, no rota</text><text x="862" y="446" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="12.5" fill="#4a5662" font-weight="400" text-anchor="start">y por defecto nadie lo valida.</text><rect x="844" y="476" width="306" height="256" rx="12" fill="#fbfcfd" stroke="#98a3ae" stroke-width="1.2" stroke-dasharray="5 4"/><text x="862" y="510" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="15" fill="#16202a" font-weight="800" text-anchor="start">Nada de kubeadm que renovar.</text><text x="862" y="536" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="12.5" fill="#4a5662" font-weight="400" text-anchor="start">Solo la CA pública (sin la clave)</text><text x="862" y="554" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="12.5" fill="#4a5662" font-weight="400" text-anchor="start">y los certificados del kubelet.</text><text x="862" y="582" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#16202a" font-weight="400" text-anchor="start">kubeadm certs check-expiration</text><text x="862" y="600" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="12.5" fill="#4a5662" font-weight="400" text-anchor="start">falla acá: busca apiserver.key</text><text x="862" y="618" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="12.5" fill="#4a5662" font-weight="400" text-anchor="start">y no la encuentra.</text><text x="862" y="654" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="12.5" fill="#4a5662" font-weight="400" text-anchor="start">Si el kubelet no logra rotar:</text><text x="862" y="674" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12.5" fill="#16202a" font-weight="400" text-anchor="start">kubectl get csr</text><text x="862" y="692" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="12.5" fill="#4a5662" font-weight="400" text-anchor="start">y revisar las que quedaron Pending.</text><rect x="32" y="776" width="22" height="16" rx="4" fill="#fff3dc" stroke="#d98a00" stroke-width="1.2"/><text x="64" y="789" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="13" fill="#4a5662" font-weight="400" text-anchor="start">1 año: los lista check-expiration y los renueva kubeadm certs renew</text><rect x="552" y="776" width="22" height="16" rx="4" fill="#f0ebff" stroke="#7656d6" stroke-width="1.2"/><text x="584" y="789" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="13" fill="#4a5662" font-weight="400" text-anchor="start">CA, 10 años: check-expiration la muestra, renew no la toca</text><rect x="32" y="804" width="22" height="16" rx="4" fill="#e3f5ea" stroke="#2f9e5b" stroke-width="1.2"/><text x="64" y="817" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="13" fill="#4a5662" font-weight="400" text-anchor="start">Rota solo: kubeadm no lo lista</text><rect x="552" y="804" width="22" height="16" rx="4" fill="#eef1f4" stroke="#98a3ae" stroke-width="1.2"/><text x="584" y="817" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="13" fill="#4a5662" font-weight="400" text-anchor="start">No vence, o nadie lo valida</text><rect x="32" y="846" width="590" height="92" rx="10" fill="#16202a" stroke="#16202a" stroke-width="1.2"/><text x="50" y="872" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="12.5" fill="#9fb3c8" font-weight="700" text-anchor="start">En cada control plane, de a uno</text><text x="50" y="896" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="13" fill="#e8f1f8" font-weight="400" text-anchor="start">sudo kubeadm certs check-expiration</text><text x="50" y="918" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="13" fill="#e8f1f8" font-weight="400" text-anchor="start">sudo kubeadm certs renew all   # + reiniciar static pods</text><rect x="640" y="846" width="528" height="92" rx="10" fill="#16202a" stroke="#16202a" stroke-width="1.2"/><text x="658" y="872" xml:space="preserve" font-family="Inter, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="12.5" fill="#9fb3c8" font-weight="700" text-anchor="start">En cualquier nodo (kubelet)</text><text x="658" y="896" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="13" fill="#e8f1f8" font-weight="400" text-anchor="start">sudo openssl x509 -noout -enddate \</text><text x="658" y="918" xml:space="preserve" font-family="'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="13" fill="#e8f1f8" font-weight="400" text-anchor="start">  -in /var/lib/kubelet/pki/kubelet-client-current.pem</text></svg>
+<figcaption>Valores por defecto de kubeadm. Cada control plane tiene su propia copia de todo lo del panel izquierdo.</figcaption></figure>
+
+<p>Casi todo vive en el control plane. Así se ve uno de los tres control planes de un cluster real con
+Kubernetes 1.33, actualizado hace 8 días:</p>
+<div class="codeblock"><div class="codeblock__label">console</div><pre><code>$ sudo kubeadm certs check-expiration
+CERTIFICATE                EXPIRES                  RESIDUAL TIME   CERTIFICATE AUTHORITY   EXTERNALLY MANAGED
+admin.conf                 Nov 04, 2027 19:26 UTC   356d            ca                      no
+apiserver                  Nov 04, 2027 19:26 UTC   356d            ca                      no
+apiserver-etcd-client      Nov 04, 2027 19:26 UTC   356d            etcd-ca                 no
+apiserver-kubelet-client   Nov 04, 2027 19:26 UTC   356d            ca                      no
+controller-manager.conf    Nov 04, 2027 19:26 UTC   356d            ca                      no
+etcd-healthcheck-client    Nov 04, 2027 19:26 UTC   356d            etcd-ca                 no
+etcd-peer                  Nov 04, 2027 19:26 UTC   356d            etcd-ca                 no
+etcd-server                Nov 04, 2027 19:26 UTC   356d            etcd-ca                 no
+front-proxy-client         Nov 04, 2027 19:26 UTC   356d            front-proxy-ca          no
+scheduler.conf             Nov 04, 2027 19:26 UTC   356d            ca                      no
+super-admin.conf           Nov 04, 2027 19:26 UTC   356d            ca                      no
+
+CERTIFICATE AUTHORITY   EXPIRES                  RESIDUAL TIME   EXTERNALLY MANAGED
+ca                      Jun 02, 2035 16:53 UTC   8y              no
+etcd-ca                 Jun 02, 2035 16:53 UTC   8y              no
+front-proxy-ca          Jun 02, 2035 16:53 UTC   8y              no
+</code></pre></div>
+<p>Tiene <code>-o json</code> si quieres procesarla en un script.</p>
+<p>Los archivos están en <code>/etc/kubernetes/pki/</code> (certificados y claves) y <code>/etc/kubernetes/*.conf</code>
+(kubeconfigs). Un detalle: <code>super-admin.conf</code> solo existe en el nodo donde se corrió <code>kubeadm init</code>; los
+otros dos control planes no lo tienen.</p>
+<p>En un worker, en cambio, hay tres cosas:</p>
+<div class="codeblock"><div class="codeblock__label">console</div><pre><code>$ sudo find /etc/kubernetes -name '*.conf' -o -name '*.crt'
+/etc/kubernetes/pki/ca.crt
+/etc/kubernetes/kubelet.conf
+$ sudo ls /var/lib/kubelet/pki
+kubelet-client-2025-06-04-14-36-52.pem
+kubelet-client-2026-03-14-05-40-57.pem
+kubelet-client-current.pem
+kubelet.crt
+kubelet.key
+</code></pre></div>
+<p>La CA pública, un kubeconfig que apunta a <code>kubelet-client-current.pem</code> (un enlace al más reciente) y los
+certificados del kubelet. En ese listado se ve que el certificado original de junio de 2025 rotó en marzo
+de 2026, sin que nadie hiciera nada.</p>
+<p>Esto explica algo que confunde la primera vez: <code>kubeadm certs check-expiration</code> solo sirve en un control
+plane. Revisa los archivos de <code>/etc/kubernetes/pki</code> y los kubeconfigs de los componentes, que solo existen
+ahí. En un worker no hay nada de eso y el comando falla buscando <code>apiserver.key</code>:</p>
+<div class="codeblock"><div class="codeblock__label">console</div><pre><code>$ sudo kubeadm certs check-expiration    # en un worker
+Error checking external CA condition for ca certificate authority: failure loading key for apiserver:
+couldn't load the private key file /etc/kubernetes/pki/apiserver.key: open /etc/kubernetes/pki/apiserver.key: no such file or directory
+</code></pre></div>
+<p>El certificado del kubelet, que existe en <strong>todos</strong> los nodos (los control planes también tienen
+kubelet), no aparece en ese listado en ningún nodo: kubeadm no lo administra porque configura al kubelet
+para <a href="https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-certs/#check-certificate-expiration" target="_blank" rel="noopener">renovarlo solo</a>,
+pidiéndole uno nuevo a la API antes de que venza. Para ver su vencimiento hay que mirarlo directo:</p>
+<div class="codeblock"><div class="codeblock__label">bash</div><pre><code>sudo openssl x509 -noout -enddate -in /var/lib/kubelet/pki/kubelet-client-current.pem
+</code></pre></div>
+<p><strong><code>kubeadm certs renew</code> se corre solo en los control planes, en cada uno.</strong> En los workers no hay nada que
+renovar a mano mientras la rotación del kubelet funcione.</p>
+</section>
+<section id="como-se-presentan-y-se-validan"><h2>Cómo se presentan y se validan</h2>
+<p>Saber dónde está cada archivo no alcanza para entender qué se rompe. Hay que ver cada conexión: en TLS
+mutuo hay <strong>dos validaciones independientes</strong>. El servidor presenta su certificado y el cliente lo valida
+contra una CA; después el cliente presenta el suyo y el servidor lo valida contra otra (o la misma). Si
+cualquiera de los dos certificados vence, esa conexión se corta.</p>
+<p>Así quedan las siete conexiones principales de un cluster kubeadm, con los flags que vimos en un cluster
+real:</p>
+<div class="scenarios">
+<figure class="map">
+  <div class="map__scroll">
+  <svg viewBox="0 0 960 450" role="img" aria-label="Mapa de las siete conexiones TLS de un cluster kubeadm. Cada flecha va del cliente al servidor. Las conexiones 1, 2 y 4 son las que se cortaron en el incidente.">
+    <defs>
+      <marker id="mk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0,0 L10,5 L0,10 z"/></marker>
+      <marker id="mk-hot" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-hot" d="M0,0 L10,5 L0,10 z"/></marker>
+    </defs>
+
+    <!-- regiones -->
+    <text class="m-region-t" x="16" y="30">FUERA</text>
+    <rect class="m-region" x="168" y="12" width="390" height="426" rx="14"/>
+    <text class="m-region-t" x="186" y="36">CONTROL PLANE</text>
+    <rect class="m-region" x="694" y="12" width="250" height="426" rx="14"/>
+    <text class="m-region-t" x="712" y="36">WORKERS</text>
+
+    <!-- aristas (debajo de las cajas) -->
+    <line class="m-edge m-edge--hot" x1="138" y1="174" x2="276" y2="204" marker-end="url(#mk-hot)"/>
+    <line class="m-edge m-edge--hot" x1="363" y1="96" x2="363" y2="180" marker-end="url(#mk-hot)"/>
+    <line class="m-edge" x1="726" y1="96" x2="452" y2="198" marker-end="url(#mk)"/>
+    <line class="m-edge" x1="452" y1="184" x2="726" y2="80" marker-end="url(#mk)"/>
+    <line class="m-edge m-edge--hot" x1="726" y1="256" x2="690" y2="256"/>
+    <line class="m-edge m-edge--hot" x1="558" y1="252" x2="452" y2="222" marker-end="url(#mk-hot)"/>
+    <line class="m-edge" x1="363" y1="238" x2="363" y2="342" marker-end="url(#mk)"/>
+    <line class="m-edge m-edge--dash" x1="425" y1="366" x2="463" y2="366" marker-start="url(#mk)" marker-end="url(#mk)"/>
+    <line class="m-edge" x1="452" y1="232" x2="726" y2="378" marker-end="url(#mk)"/>
+
+    <!-- cajas -->
+    <rect class="m-box" x="18" y="152" width="120" height="44" rx="8"/>
+    <text class="m-t" x="78" y="179" text-anchor="middle">kubectl</text>
+
+    <rect class="m-box" x="236" y="52" width="254" height="44" rx="8"/>
+    <text class="m-t" x="363" y="79" text-anchor="middle">scheduler · controller-manager</text>
+
+    <rect class="m-box m-box--main" x="276" y="180" width="176" height="58" rx="8"/>
+    <text class="m-t m-t--b" x="364" y="206" text-anchor="middle">kube-apiserver</text>
+    <text class="m-s" x="364" y="225" text-anchor="middle">:6443</text>
+
+    <rect class="m-box" x="303" y="342" width="122" height="48" rx="8"/>
+    <text class="m-t" x="364" y="364" text-anchor="middle">etcd</text>
+    <text class="m-s" x="364" y="381" text-anchor="middle">:2379</text>
+
+    <rect class="m-box m-box--ghost" x="463" y="342" width="84" height="48" rx="8"/>
+    <text class="m-s" x="505" y="362" text-anchor="middle">etcd de los</text>
+    <text class="m-s" x="505" y="378" text-anchor="middle">otros CP</text>
+
+    <rect class="m-pill" x="558" y="232" width="132" height="46" rx="23"/>
+    <text class="m-s m-s--b" x="624" y="252" text-anchor="middle">Service kubernetes</text>
+    <text class="m-s" x="624" y="268" text-anchor="middle">10.96.0.1:443</text>
+
+    <rect class="m-box" x="726" y="62" width="200" height="48" rx="8"/>
+    <text class="m-t" x="826" y="84" text-anchor="middle">kubelet</text>
+    <text class="m-s" x="826" y="101" text-anchor="middle">:10250 · en todos los nodos</text>
+
+    <rect class="m-box" x="726" y="232" width="200" height="48" rx="8"/>
+    <text class="m-t" x="826" y="254" text-anchor="middle">pod</text>
+    <text class="m-s" x="826" y="271" text-anchor="middle">app, runner de CI</text>
+
+    <rect class="m-box" x="726" y="356" width="200" height="48" rx="8"/>
+    <text class="m-t" x="826" y="378" text-anchor="middle">metrics-server</text>
+    <text class="m-s" x="826" y="395" text-anchor="middle">API agregada</text>
+
+    <!-- números -->
+    <g class="m-badge m-badge--hot"><circle cx="207" cy="189" r="12"/><text x="207" y="194" text-anchor="middle">1</text></g>
+    <g class="m-badge m-badge--hot"><circle cx="363" cy="138" r="12"/><text x="363" y="143" text-anchor="middle">2</text></g>
+    <g class="m-badge"><circle cx="617" cy="162" r="12"/><text x="617" y="167" text-anchor="middle">3</text></g>
+    <g class="m-badge m-badge--hot"><circle cx="505" cy="237" r="12"/><text x="505" y="242" text-anchor="middle">4</text></g>
+    <g class="m-badge"><circle cx="560" cy="122" r="12"/><text x="560" y="127" text-anchor="middle">5</text></g>
+    <g class="m-badge"><circle cx="363" cy="290" r="12"/><text x="363" y="295" text-anchor="middle">6</text></g>
+    <g class="m-badge"><circle cx="444" cy="410" r="12"/><text x="444" y="415" text-anchor="middle">6</text></g>
+    <g class="m-badge"><circle cx="589" cy="305" r="12"/><text x="589" y="310" text-anchor="middle">7</text></g>
+  </svg>
+  </div>
+  <figcaption>Cada flecha va del cliente al servidor; el número es la tarjeta de abajo. En ámbar, las tres
+  conexiones que se cortaron en el incidente del principio. La flecha punteada es la de etcd entre control planes.</figcaption>
+</figure>
+
+<div class="legend" role="list" aria-label="Qué significa cada color">
+  <span role="listitem"><span class="chip chip--renew">1 año</span> lo renueva <code>kubeadm certs renew</code></span>
+  <span role="listitem"><span class="chip chip--ca">CA</span> 10 años, contra ella se valida</span>
+  <span role="listitem"><span class="chip chip--rota">rota solo</span> lo renueva el kubelet</span>
+  <span role="listitem"><span class="chip chip--token">token</span> no es un certificado</span>
+  <span role="listitem"><span class="chip chip--quieto">quieto</span> no vence, o nadie lo valida</span>
+</div>
+<div class="flows">
+<article class="flow flow--hot" id="conexion-1" aria-labelledby="conexion-1-t">
+  <header class="flow__head">
+    <span class="flow__no">1</span>
+    <h3 id="conexion-1-t">kubectl <span aria-hidden="true">→</span><span class="sr"> a </span> kube-apiserver</h3>
+    <span class="flow__tag">se cortó en el incidente</span>
+  </header>
+  <div class="flow__actors" aria-hidden="true">
+    <div class="actor actor--client">kubectl<small>persona o pipeline</small></div>
+    <div></div>
+    <div class="actor actor--server">kube-apiserver<small>:6443</small></div>
+  </div>
+  <div class="step step--to-client">
+    <div class="side side--client" data-actor="kubectl"><span class="verb">valida con</span><span class="chip chip--ca">ca.crt</span><small>embebida en el kubeconfig</small></div>
+    <div class="wire" aria-hidden="true"><span class="wire__label">el servidor se identifica</span></div>
+    <div class="side side--server" data-actor="kube-apiserver"><span class="verb">presenta</span><span class="chip chip--renew">apiserver.crt</span></div>
+  </div>
+  <div class="step step--to-server">
+    <div class="side side--client" data-actor="kubectl"><span class="verb">presenta</span><span class="chip chip--renew">admin.conf</span><small>certificado embebido</small></div>
+    <div class="wire wire--right" aria-hidden="true"><span class="wire__label">el cliente se identifica</span></div>
+    <div class="side side--server" data-actor="kube-apiserver"><span class="verb">valida con</span><span class="chip chip--ca">ca.crt</span><small>--client-ca-file · CN y O pasan a ser usuario y grupos para RBAC</small></div>
+  </div>
+  <p class="flow__expiry"><b>Si vence:</b> <code>x509: certificate has expired or is not yet valid</code> si vence el del apiserver; <code>Unauthorized</code> si vence el de <code>admin.conf</code>.</p>
+</article>
+<article class="flow flow--hot" id="conexion-2" aria-labelledby="conexion-2-t">
+  <header class="flow__head">
+    <span class="flow__no">2</span>
+    <h3 id="conexion-2-t">scheduler · controller-manager <span aria-hidden="true">→</span><span class="sr"> a </span> kube-apiserver</h3>
+    <span class="flow__tag">se cortó en el incidente</span>
+  </header>
+  <div class="flow__actors" aria-hidden="true">
+    <div class="actor actor--client">scheduler · controller-manager<small>static pods</small></div>
+    <div></div>
+    <div class="actor actor--server">kube-apiserver<small>:6443</small></div>
+  </div>
+  <div class="step step--to-client">
+    <div class="side side--client" data-actor="scheduler · controller-manager"><span class="verb">valida con</span><span class="chip chip--ca">ca.crt</span><small>la CA de su kubeconfig</small></div>
+    <div class="wire" aria-hidden="true"><span class="wire__label">el servidor se identifica</span></div>
+    <div class="side side--server" data-actor="kube-apiserver"><span class="verb">presenta</span><span class="chip chip--renew">apiserver.crt</span></div>
+  </div>
+  <div class="step step--to-server">
+    <div class="side side--client" data-actor="scheduler · controller-manager"><span class="verb">presenta</span><span class="chip chip--renew">scheduler.conf</span><span class="chip chip--renew">controller-manager.conf</span></div>
+    <div class="wire wire--right" aria-hidden="true"><span class="wire__label">el cliente se identifica</span></div>
+    <div class="side side--server" data-actor="kube-apiserver"><span class="verb">valida con</span><span class="chip chip--ca">ca.crt</span><small>--client-ca-file</small></div>
+  </div>
+  <p class="flow__expiry"><b>Si vence:</b> <code>Unauthorized</code>: no se programan pods ni se reconcilian Deployments y Jobs. Leen el certificado al arrancar, así que hay que reiniciarlos después de renovar.</p>
+</article>
+<article class="flow" id="conexion-3" aria-labelledby="conexion-3-t">
+  <header class="flow__head">
+    <span class="flow__no">3</span>
+    <h3 id="conexion-3-t">kubelet <span aria-hidden="true">→</span><span class="sr"> a </span> kube-apiserver</h3>
+    
+  </header>
+  <div class="flow__actors" aria-hidden="true">
+    <div class="actor actor--client">kubelet<small>en todos los nodos</small></div>
+    <div></div>
+    <div class="actor actor--server">kube-apiserver<small>:6443</small></div>
+  </div>
+  <div class="step step--to-client">
+    <div class="side side--client" data-actor="kubelet"><span class="verb">valida con</span><span class="chip chip--ca">ca.crt</span><small>la CA de kubelet.conf</small></div>
+    <div class="wire" aria-hidden="true"><span class="wire__label">el servidor se identifica</span></div>
+    <div class="side side--server" data-actor="kube-apiserver"><span class="verb">presenta</span><span class="chip chip--renew">apiserver.crt</span></div>
+  </div>
+  <div class="step step--to-server">
+    <div class="side side--client" data-actor="kubelet"><span class="verb">presenta</span><span class="chip chip--rota">kubelet-client-current.pem</span><small>rota solo</small></div>
+    <div class="wire wire--right" aria-hidden="true"><span class="wire__label">el cliente se identifica</span></div>
+    <div class="side side--server" data-actor="kube-apiserver"><span class="verb">valida con</span><span class="chip chip--ca">ca.crt</span><small>--client-ca-file · CN system:node:&lt;nodo&gt;</small></div>
+  </div>
+  <p class="flow__expiry"><b>Si vence:</b> Solo si la rotación falla: el nodo pasa a <code>NotReady</code>.</p>
+</article>
+<article class="flow flow--hot" id="conexion-4" aria-labelledby="conexion-4-t">
+  <header class="flow__head">
+    <span class="flow__no">4</span>
+    <h3 id="conexion-4-t">pod <span aria-hidden="true">→</span><span class="sr"> a </span> kube-apiserver</h3>
+    <span class="flow__tag">se cortó en el incidente</span>
+  </header>
+  <div class="flow__actors" aria-hidden="true">
+    <div class="actor actor--client">pod<small>una app, un runner de CI</small></div>
+    <div></div>
+    <div class="actor actor--server">kube-apiserver<small>vía 10.96.0.1:443</small></div>
+  </div>
+  <div class="step step--to-client">
+    <div class="side side--client" data-actor="pod"><span class="verb">valida con</span><span class="chip chip--ca">ca.crt</span><small>/var/run/secrets/kubernetes.io/serviceaccount/ca.crt</small></div>
+    <div class="wire" aria-hidden="true"><span class="wire__label">el servidor se identifica</span></div>
+    <div class="side side--server" data-actor="kube-apiserver"><span class="verb">presenta</span><span class="chip chip--renew">apiserver.crt</span><small>incluye 10.96.0.1 y kubernetes.default.svc</small></div>
+  </div>
+  <div class="step step--to-server">
+    <div class="side side--client" data-actor="pod"><span class="verb">presenta</span><span class="chip chip--token">token de ServiceAccount</span><small>no es un certificado</small></div>
+    <div class="wire wire--right" aria-hidden="true"><span class="wire__label">el cliente se identifica</span></div>
+    <div class="side side--server" data-actor="kube-apiserver"><span class="verb">valida con</span><span class="chip chip--quieto">sa.pub</span><small>--service-account-key-file</small></div>
+  </div>
+  <p class="flow__expiry"><b>Si vence:</b> <code>CERTIFICATE_VERIFY_FAILED: certificate has expired</code>. Si quedó un solo apiserver sin renovar, falla una parte de los pedidos: el Service reparte entre todos.</p>
+</article>
+<article class="flow" id="conexion-5" aria-labelledby="conexion-5-t">
+  <header class="flow__head">
+    <span class="flow__no">5</span>
+    <h3 id="conexion-5-t">kube-apiserver <span aria-hidden="true">→</span><span class="sr"> a </span> kubelet</h3>
+    
+  </header>
+  <div class="flow__actors" aria-hidden="true">
+    <div class="actor actor--client">kube-apiserver<small>logs, exec, port-forward</small></div>
+    <div></div>
+    <div class="actor actor--server">kubelet<small>:10250</small></div>
+  </div>
+  <div class="step step--to-client">
+    <div class="side side--client" data-actor="kube-apiserver"><span class="verb">valida con</span><span class="chip chip--none">no lo valida</span><small>falta --kubelet-certificate-authority</small></div>
+    <div class="wire" aria-hidden="true"><span class="wire__label">el servidor se identifica</span></div>
+    <div class="side side--server" data-actor="kubelet"><span class="verb">presenta</span><span class="chip chip--quieto">kubelet.crt</span><small>autofirmado</small></div>
+  </div>
+  <div class="step step--to-server">
+    <div class="side side--client" data-actor="kube-apiserver"><span class="verb">presenta</span><span class="chip chip--renew">apiserver-kubelet-client.crt</span></div>
+    <div class="wire wire--right" aria-hidden="true"><span class="wire__label">el cliente se identifica</span></div>
+    <div class="side side--server" data-actor="kubelet"><span class="verb">valida con</span><span class="chip chip--ca">ca.crt</span><small>clientCAFile del kubelet</small></div>
+  </div>
+  <p class="flow__expiry"><b>Si vence:</b> Si vence <code>apiserver-kubelet-client.crt</code>, fallan <code>kubectl logs</code>, <code>exec</code> y <code>port-forward</code>. Si vence <code>kubelet.crt</code>, no pasa nada.</p>
+</article>
+<article class="flow" id="conexion-6" aria-labelledby="conexion-6-t">
+  <header class="flow__head">
+    <span class="flow__no">6</span>
+    <h3 id="conexion-6-t">kube-apiserver <span aria-hidden="true">→</span><span class="sr"> a </span> etcd</h3>
+    
+  </header>
+  <div class="flow__actors" aria-hidden="true">
+    <div class="actor actor--client">kube-apiserver</div>
+    <div></div>
+    <div class="actor actor--server">etcd<small>:2379</small></div>
+  </div>
+  <div class="step step--to-client">
+    <div class="side side--client" data-actor="kube-apiserver"><span class="verb">valida con</span><span class="chip chip--ca">etcd/ca.crt</span><small>--etcd-cafile</small></div>
+    <div class="wire" aria-hidden="true"><span class="wire__label">el servidor se identifica</span></div>
+    <div class="side side--server" data-actor="etcd"><span class="verb">presenta</span><span class="chip chip--renew">etcd/server.crt</span></div>
+  </div>
+  <div class="step step--to-server">
+    <div class="side side--client" data-actor="kube-apiserver"><span class="verb">presenta</span><span class="chip chip--renew">apiserver-etcd-client.crt</span></div>
+    <div class="wire wire--right" aria-hidden="true"><span class="wire__label">el cliente se identifica</span></div>
+    <div class="side side--server" data-actor="etcd"><span class="verb">valida con</span><span class="chip chip--ca">etcd/ca.crt</span><small>--trusted-ca-file · --client-cert-auth=true</small></div>
+  </div>
+  <p class="flow__expiry"><b>Si vence:</b> La API se queda sin datos. Entre miembros de etcd (<code>:2380</code>) pasa lo mismo con <code>etcd/peer.crt</code>, validado con <code>--peer-trusted-ca-file</code>: si vence, se pierde el quórum.</p>
+</article>
+<article class="flow" id="conexion-7" aria-labelledby="conexion-7-t">
+  <header class="flow__head">
+    <span class="flow__no">7</span>
+    <h3 id="conexion-7-t">kube-apiserver <span aria-hidden="true">→</span><span class="sr"> a </span> metrics-server</h3>
+    
+  </header>
+  <div class="flow__actors" aria-hidden="true">
+    <div class="actor actor--client">kube-apiserver<small>kubectl top, HPA</small></div>
+    <div></div>
+    <div class="actor actor--server">metrics-server<small>API agregada</small></div>
+  </div>
+  <div class="step step--to-client">
+    <div class="side side--client" data-actor="kube-apiserver"><span class="verb">valida con</span><span class="chip chip--flag">caBundle del APIService</span><small>o nada, con insecureSkipTLSVerify: true</small></div>
+    <div class="wire" aria-hidden="true"><span class="wire__label">el servidor se identifica</span></div>
+    <div class="side side--server" data-actor="metrics-server"><span class="verb">presenta</span><span class="chip chip--neutral">su propio certificado</span></div>
+  </div>
+  <div class="step step--to-server">
+    <div class="side side--client" data-actor="kube-apiserver"><span class="verb">presenta</span><span class="chip chip--renew">front-proxy-client.crt</span></div>
+    <div class="wire wire--right" aria-hidden="true"><span class="wire__label">el cliente se identifica</span></div>
+    <div class="side side--server" data-actor="metrics-server"><span class="verb">valida con</span><span class="chip chip--ca">front-proxy-ca.crt</span><small>--requestheader-client-ca-file</small></div>
+  </div>
+  <p class="flow__expiry"><b>Si vence:</b> Fallan <code>kubectl top</code> y los HPA que escalan por CPU o memoria.</p>
+</article></div></div>
+
+<p>Tres cosas que se ven mejor así:</p>
+<ul>
+<li><strong>Las CA separan dominios.</strong> etcd solo acepta certificados de <code>etcd-ca</code>: un certificado firmado por la CA
+  general no le sirve a nadie para leer etcd, aunque sea de administrador.</li>
+<li><strong>Los pods no usan certificado de cliente.</strong> Se identifican con un token de ServiceAccount firmado con
+  <code>sa.key</code>
+  (<a href="https://kubernetes.io/docs/tasks/run-application/access-api-from-pod/" target="_blank" rel="noopener">Accessing the API from a Pod</a>).
+  Renovar no lo toca. Lo único que comparten con el resto es que validan el <code>apiserver.crt</code>.</li>
+<li><strong>Hay validaciones que nadie hace.</strong> El serving cert del kubelet no se valida por defecto, y el
+  metrics-server se suele registrar con <code>insecureSkipTLSVerify: true</code> (en el cluster de ejemplo, también
+  con <code>--kubelet-insecure-tls</code>). Por eso esos certificados pueden vencer sin que nada falle.</li>
+</ul>
+<p>El canal del front-proxy merece una línea: cuando el apiserver le pasa un pedido a una API agregada, se
+autentica con <code>front-proxy-client.crt</code> y el metrics-server lo valida contra la CA de
+<code>--requestheader-client-ca-file</code>
+(<a href="https://kubernetes.io/docs/tasks/extend-kubernetes/configure-aggregation-layer/" target="_blank" rel="noopener">Configure the Aggregation Layer</a>).</p>
+</section>
+<section id="que-se-rompe-cuando-vencen"><h2>Qué se rompe cuando vencen</h2>
+<p>Lo traicionero es que no se cae todo de golpe. Los contenedores que ya corren no dependen de estos
+certificados, así que el cluster parece vivo. Lo que se rompe es todo lo que necesita <em>hablar</em>. Esto es lo
+que cabe esperar según el rol de cada certificado (la primera fila es la que vivimos en el incidente):</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Si vence…</th>
+<th>Pasa esto</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scheduler.conf</code>, <code>controller-manager.conf</code></td>
+<td><code>Unauthorized</code> contra el apiserver. No se programan pods nuevos y no se reconcilian Deployments ni Jobs</td>
+</tr>
+<tr>
+<td><code>apiserver</code></td>
+<td>Ningún cliente valida el TLS del apiserver: <code>x509: certificate has expired or is not yet valid</code> en kubectl, kubelets y controladores</td>
+</tr>
+<tr>
+<td><code>apiserver-etcd-client</code>, <code>etcd-*</code></td>
+<td>El apiserver pierde etcd, o etcd pierde quórum: la API deja de responder</td>
+</tr>
+<tr>
+<td><code>apiserver-kubelet-client</code></td>
+<td>Fallan <code>kubectl logs</code>, <code>exec</code> y <code>port-forward</code></td>
+</tr>
+<tr>
+<td><code>front-proxy-client</code></td>
+<td>Fallan las APIs agregadas: <code>kubectl top</code> y los HPA por métricas de recursos</td>
+</tr>
+<tr>
+<td><code>admin.conf</code></td>
+<td>Pierdes el acceso de administrador, y también cualquier persona o herramienta que tenga una copia. Suele ser lo primero que se nota</td>
+</tr>
+<tr>
+<td><code>kubelet-client</code></td>
+<td>El kubelet no puede reportar: el nodo pasa a <code>NotReady</code></td>
+</tr>
+<tr>
+<td>una CA</td>
+<td>Todo lo anterior a la vez, y kubeadm <a href="https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-certs/#certificate-authority-rotation" target="_blank" rel="noopener">no rota CA</a> por sí mismo</td>
+</tr>
+</tbody>
+</table></div>
+<p>El apiserver rechaza cualquier certificado de cliente fuera de su <code>notAfter</code>
+(<a href="https://kubernetes.io/docs/reference/access-authn-authz/authentication/#x509-client-certificates" target="_blank" rel="noopener">Authenticating</a>):
+no hay período de gracia.</p>
+</section>
+<section id="como-rotarlos"><h2>Cómo rotarlos</h2>
+<h3>1. Actualizar Kubernetes al menos una vez por año</h3>
+<p>Es el caso simple para el que está pensado kubeadm: <em>"kubeadm renews all the certificates during
+control plane upgrade"</em>, y si actualizas con menos de un año entre upgrades, <em>"kubeadm will take care of
+keeping your cluster up to date"</em>. La misma página aclara que está <em>"designed for addressing the
+simplest use cases"</em>
+(<a href="https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-certs/#automatic-certificate-renewal" target="_blank" rel="noopener">Automatic certificate renewal</a>).
+Por eso el cluster de arriba muestra 356 días: el upgrade de hace 8 días los renovó.</p>
+<p>El riesgo es obvio: si el upgrade se posterga, los certificados no esperan.</p>
+<h3>2. Renovarlos a mano</h3>
+<p>En <strong>cada</strong> control plane, de a uno:</p>
+<div class="codeblock"><div class="codeblock__label">bash</div><pre><code>sudo kubeadm certs check-expiration
+sudo cp -a /etc/kubernetes /etc/kubernetes.bak-$(date +%F)
+# backup de etcd con etcdctl snapshot save antes de seguir
+
+sudo kubeadm certs renew all
+
+# Reiniciar los static pods para que lean los certificados nuevos
+cd /etc/kubernetes/manifests
+sudo mv kube-apiserver.yaml kube-controller-manager.yaml kube-scheduler.yaml /tmp/
+sleep 20
+sudo mv /tmp/kube-apiserver.yaml /tmp/kube-controller-manager.yaml /tmp/kube-scheduler.yaml .
+
+# Verificar antes de pasar al siguiente nodo
+sudo kubeadm certs check-expiration
+kubectl --kubeconfig /etc/kubernetes/admin.conf get --raw=/healthz
+</code></pre></div>
+<p>El paso que se olvida es el reinicio, y la documentación lo pide explícitamente: <em>"After running the
+command you should restart the control plane Pods. This is required since dynamic certificate reload is
+currently not supported for all components and certificates"</em>
+(<a href="https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-certs/#manual-certificate-renewal" target="_blank" rel="noopener">Manual certificate renewal</a>).
+Los static pods los maneja el kubelet local, no el apiserver: por eso se reinician sacando el manifiesto
+del directorio, esperando 20 segundos (<code>fileCheckFrequency</code>) y volviéndolo a poner.</p>
+<h3>Tres tropiezos al renovar</h3>
+<p>Los tres aparecieron en el incidente del principio.</p>
+<p><strong>Renovar en un solo control plane.</strong> Cada control plane tiene su propia copia de <code>/etc/kubernetes/pki</code>
+y de los kubeconfigs, y <code>kubeadm certs renew</code> solo toca el nodo donde corre. La documentación lo avisa:
+<em>"If you are running cluster with a replicated control plane, this command needs to be executed on all
+the control-plane nodes"</em>. El síntoma confunde porque es intermitente: los pods le hablan al apiserver
+por el Service <code>kubernetes</code>, que
+<a href="https://kubernetes.io/docs/concepts/architecture/control-plane-node-communication/#node-to-control-plane" target="_blank" rel="noopener">redirige al endpoint HTTPS del apiserver</a>,
+y en un control plane en HA tiene un endpoint por apiserver. Algunos pedidos caen en un nodo renovado y
+otros no. Para evitarlo, renueva en todos y verifica cada apiserver por su IP, no por la VIP del
+balanceador:</p>
+<div class="codeblock"><div class="codeblock__label">bash</div><pre><code>for ip in &lt;cp-1&gt; &lt;cp-2&gt; &lt;cp-3&gt;; do
+  echo | openssl s_client -connect &quot;$ip:6443&quot; 2&gt;/dev/null | openssl x509 -noout -enddate
+done
+</code></pre></div>
+<p>La regla 1 de la alerta, más abajo, también lo detecta: reporta por nodo, así que un control plane que
+quedó sin renovar sigue disparando.</p>
+<p><strong>No reiniciar los static pods.</strong> Es el paso que explicamos arriba: si no se reinician, el scheduler y el
+controller-manager siguen presentando el certificado viejo aunque en disco ya esté el nuevo.</p>
+<p><strong>Las copias de <code>admin.conf</code>.</strong> Las personas pierden el acceso primero porque trabajan con copias de
+<code>admin.conf</code>, y después de renovar hay que volver a repartirlo, igual que en cualquier pipeline o script
+que tenga una copia guardada. La documentación de kubeadm directamente lo desaconseja: <em>"Avoid sharing the
+<code>super-admin.conf</code> or <code>admin.conf</code> files. Instead, create least privileged access even for people who
+work as administrators and use that least privilege alternative for anything other than break-glass
+(emergency) access"</em>
+(<a href="https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-certs/#kubeconfig-additional-users" target="_blank" rel="noopener">Generating kubeconfig files for additional users</a>).
+Para las herramientas, una ServiceAccount con los permisos justos. Para las personas, si les emites
+certificados firmados con la CA del cluster, ten en cuenta que también vencen y que <code>check-expiration</code> no
+los lista: en el cluster de ejemplo encontramos uno de usuario vencido hace cinco meses.</p>
+<p>Lo que <strong>no</strong> hace falta tocar: <code>renew</code> firma con la CA existente
+(<a href="https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-certs/#manual-certificate-renewal" target="_blank" rel="noopener">Manual certificate renewal</a>),
+y los tokens de ServiceAccount se firman con <code>sa.key</code>, que no es un certificado. Lo que se autentica con
+un token de ServiceAccount, o solo confía en la CA, sigue funcionando después de renovar. Si algo de eso
+falla justo después, busca otra causa: a nosotros nos pasó dos semanas más tarde, y era otra cosa.</p>
+<h3>3. Automatizarlo</h3>
+<p>Un compañero del equipo propuso, después del incidente, un timer de systemd mensual en cada control
+plane que: chequea el vencimiento, renueva si faltan menos de 60 días, reinicia los static pods y espera
+a que el apiserver local responda. Los timers se escalonan por nodo para no reiniciar los tres apiservers
+el mismo día. Cierra los dos huecos (renovación tardía y falta de reinicio), pero toca el control plane
+sin nadie mirando, así que conviene probarlo de punta a punta en un cluster de laboratorio antes.</p>
+<h3>4. Alargar la validez</h3>
+<p>Desde la API <code>v1beta4</code> de kubeadm se puede subir <code>certificateValidityPeriod</code> (por ejemplo a 2 o 3 años)
+y aplicarlo en la próxima renovación. Baja la frecuencia, pero no elimina la tarea y agranda el riesgo:
+<em>"Kubernetes does not support certificate revocation. Any certificate that is issued remains valid until
+it expires"</em>
+(<a href="https://kubernetes.io/docs/reference/access-authn-authz/authentication/#x509-client-certificates" target="_blank" rel="noopener">Authenticating</a>).
+Un <code>admin.conf</code> filtrado con tres años de vida es un problema de tres años. Si la usas, que sea como
+complemento de 1 o 3, no como reemplazo.</p>
+<h3>¿Y la CA?</h3>
+<p>Vence a los 10 años y nadie la renueva: ni <code>kubeadm certs renew</code> ni el upgrade la tocan
+(<a href="https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-certs/#certificate-authority-rotation" target="_blank" rel="noopener">Certificate authority rotation</a>).
+Cuando vence, todos los certificados que firmó dejan de validar a la vez, aunque se hayan renovado el día
+anterior. Y <code>renew</code> ya no sirve: kubeadm solo muestra un aviso y firma igual certificados que nadie acepta
+(<a href="https://github.com/kubernetes/kubernetes/blob/master/cmd/kubeadm/app/phases/certs/certs.go" target="_blank" rel="noopener">certs.go</a>).
+Hay dos salidas y las dos se planifican con meses de anticipación: la
+<a href="https://kubernetes.io/docs/tasks/tls/manual-rotation-of-ca-certificates/" target="_blank" rel="noopener">rotación manual de la CA</a>,
+larga y pensada para un control plane en HA, o reconstruir el cluster antes de esa fecha. Por eso la
+alerta de 30 días deja afuera a las CA: para ellas conviene un aviso con un año de margen.</p>
+<h3>El certificado que nadie mira: el del kubelet como servidor</h3>
+<p>En el mismo cluster, el <code>kubelet.crt</code> de los cuatro nodos que revisamos venció hace 161 días, y no pasó
+nada. Es un certificado autofirmado que el kubelet genera si no le das uno
+(<a href="https://kubernetes.io/docs/reference/access-authn-authz/kubelet-tls-bootstrapping/#client-and-serving-certificates" target="_blank" rel="noopener">TLS bootstrapping</a>),
+con un año de vida por defecto (<a href="https://github.com/kubernetes/client-go/blob/master/util/cert/cert.go" target="_blank" rel="noopener">client-go</a>).
+No encontramos documentación sobre su renovación, pero lo observado es claro: el de estos nodos sigue
+siendo el de junio de 2025, aunque el kubelet se reinició en el upgrade de hace 8 días.
+No rompe nada porque nadie lo valida: <em>"By default, the API server does not verify the kubelet's serving
+certificate"</em>
+(<a href="https://kubernetes.io/docs/concepts/architecture/control-plane-node-communication/#api-server-to-kubelet" target="_blank" rel="noopener">Control plane to node communication</a>),
+y por la misma razón metrics-server suele instalarse con <code>--kubelet-insecure-tls</code>.</p>
+<p>Si quieres validarlo, kubeadm documenta cómo
+<a href="https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-certs/#kubelet-serving-certs" target="_blank" rel="noopener">pedir serving certs firmados por la CA</a>
+con <code>serverTLSBootstrap: true</code>. El precio: esas CSR no se aprueban solas, así que necesitas aprobarlas a
+mano o con un controlador como <a href="https://github.com/postfinance/kubelet-csr-approver" target="_blank" rel="noopener">kubelet-csr-approver</a>.
+Lo importante es decidirlo, no descubrirlo.</p>
+</section>
+<section id="la-alerta"><h2>La alerta</h2>
+<p>Después del incidente, el pedido fue un aviso automático una semana antes del vencimiento. Es la idea
+correcta con el plazo corto: renovar un control plane on-premise es un cambio que se planifica, y si el
+aviso llega un viernes, la semana se va en coordinarlo. Abajo explicamos por qué elegimos 30 días.</p>
+<h3>Lo que ya tienes (y quizá no te llega)</h3>
+<p>Si usas kube-prometheus-stack, ya tienes reglas para esto:
+<a href="https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeclientcertificateexpiration/" target="_blank" rel="noopener"><code>KubeClientCertificateExpiration</code></a>
+y <code>KubeletClientCertificateExpiration</code>, que avisan a los <strong>7 días</strong> (warning) y a las <strong>24 horas</strong>
+(critical). Tienen dos problemas:</p>
+<ol>
+<li>Siete días es poco para tocar un control plane on-premise con ventana de cambios.</li>
+<li>Viven en Prometheus y notifican por Alertmanager. En el cluster que revisamos, el Alertmanager tenía
+   un único receiver, <code>null</code>: las reglas se evaluaban y nadie las recibía. Las notificaciones salían de
+   Grafana. Vale la pena mirarlo en el tuyo:</li>
+</ol>
+<div class="codeblock"><div class="codeblock__label">bash</div><pre><code>kubectl get --raw &quot;/api/v1/namespaces/&lt;ns&gt;/services/&lt;alertmanager&gt;:9093/proxy/api/v2/receivers&quot;
+</code></pre></div>
+<h3>Regla 3 primero: la que no requiere instalar nada</h3>
+<p>El apiserver expone <code>apiserver_client_certificate_expiration_seconds</code>, un histograma con
+<em>"the remaining lifetime on the certificate used to authenticate a request"</em>
+(<a href="https://kubernetes.io/docs/reference/instrumentation/metrics/" target="_blank" rel="noopener">Metrics Reference</a>). Cada pedido que
+llega con certificado de cliente suma una observación con los segundos que le quedan.</p>
+<p>Tiene una virtud que ningún exportador de archivos tiene: <strong>mide el certificado que el componente
+presenta, no el que está en disco.</strong> El scheduler del incidente, con el certificado viejo en memoria,
+habría aparecido acá aunque <code>check-expiration</code> ya mostrara 365 días.</p>
+<p>Dos cuidados. Es un histograma, así que <code>histogram_quantile</code> interpola: en el cluster de ejemplo, el
+percentil 1 daba 92 días cuando el certificado más próximo a vencer tenía 121. Y los buckets son contadores
+acumulados desde que arrancó el apiserver. Lo robusto es mirar si el bucket de 30 días (<code>le="2.592e+06"</code>)
+creció en la última hora:</p>
+<div class="codeblock"><div class="codeblock__label">promql</div><pre><code>sum by (instance) (
+  increase(apiserver_client_certificate_expiration_seconds_bucket{job=&quot;apiserver&quot;, le=&quot;2.592e+06&quot;}[1h])
+) &gt; 0
+</code></pre></div>
+<p>Como el apiserver registra la observación
+<a href="https://github.com/kubernetes/kubernetes/blob/master/staging/src/k8s.io/apiserver/pkg/authentication/request/x509/x509.go" target="_blank" rel="noopener">antes de validar el certificado</a>,
+un certificado ya vencido también cae en ese bucket.</p>
+<p>Probada contra el Prometheus del cluster de ejemplo (tres apiservers), cambiando solo el bucket:</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Bucket</th>
+<th>Pedidos en la última hora</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>30 días</td>
+<td>0 / 0 / 0</td>
+</tr>
+<tr>
+<td>90 días</td>
+<td>0 / 0 / 0</td>
+</tr>
+<tr>
+<td>180 días</td>
+<td>5208 / 1434 / 566</td>
+</tr>
+</tbody>
+</table></div>
+<p>Nadie se autentica con menos de 90 días; los kubelets de los workers (121 a 163 días) aparecen en el de
+180. La consulta ve lo que tiene que ver.</p>
+<p>Sus límites: solo ve certificados de <strong>cliente</strong> que se están usando contra el apiserver. No ve el
+certificado de servidor del apiserver, ni etcd, ni el front-proxy, y la métrica es ALPHA.</p>
+<h3>Regla 1: el resto, con node_exporter</h3>
+<p>Para los certificados de servidor hace falta leer los archivos. La forma más simple que encontramos es el
+<a href="https://github.com/prometheus/node_exporter#textfile-collector" target="_blank" rel="noopener">textfile collector</a> de node_exporter:
+un script deja un archivo <code>.prom</code> en un directorio y node_exporter lo publica junto con el resto de sus
+métricas.</p>
+<p><a href="https://github.com/agustin130a/tech-articles/tree/main/kubeadm-cert-expiry/exporter" target="_blank" rel="noopener"><code>kubeadm-cert-exporter.sh</code></a>
+lee las tres CA, los siete leaf certs, el certificado embebido en los cuatro kubeconfigs y los dos del
+kubelet, y escribe una línea por certificado:</p>
+<div class="codeblock"><div class="codeblock__label">text</div><pre><code>kubeadm_cert_not_after_seconds{host=&quot;cp-1&quot;,cert=&quot;apiserver&quot;,kind=&quot;leaf&quot;} 1825356403
+kubeadm_cert_not_after_seconds{host=&quot;cp-1&quot;,cert=&quot;scheduler.conf&quot;,kind=&quot;kubeconfig&quot;} 1825356403
+kubeadm_cert_not_after_seconds{host=&quot;worker-1&quot;,cert=&quot;kubelet-client&quot;,kind=&quot;kubelet-client&quot;} 1805013357
+kubeadm_cert_exporter_last_run_timestamp_seconds{host=&quot;cp-1&quot;} 1794517969
+</code></pre></div>
+<p>Corre cada hora con un timer de systemd, en todos los nodos (en los workers solo encuentra la CA y los
+del kubelet). Solo lee certificados públicos: nunca abre <code>client-key-data</code> ni los <code>.key</code>.</p>
+<p>Dos detalles que aprendimos al revisar la primera versión, que leía cuatro <code>.crt</code> de <code>pki/</code>:</p>
+<ul>
+<li><strong>Hay que leer los kubeconfigs.</strong> <code>scheduler.conf</code> y <code>controller-manager.conf</code>, los que vencieron en el
+  incidente, no son archivos <code>.crt</code>: el certificado está embebido en base64.</li>
+<li><strong>El node_exporter de kube-prometheus-stack no trae el textfile collector apuntando a ningún lado.</strong>
+  Como el chart ya monta la raíz del host en <code>/host/root</code>
+  (<a href="https://github.com/prometheus-community/helm-charts/blob/main/charts/prometheus-node-exporter/values.yaml" target="_blank" rel="noopener"><code>hostRootFsMount</code></a>),
+  debería alcanzar con un flag. Ojo: esto lo probamos en docker con la misma ruta, no en un cluster. Y
+  <code>extraArgs</code> reemplaza la lista completa, así que hay que repetir los valores por defecto:</li>
+</ul>
+<div class="codeblock"><div class="codeblock__label">yaml</div><pre><code>prometheus-node-exporter:
+  extraArgs:
+    - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run/containerd/.+|var/lib/docker/.+|var/lib/kubelet/.+)($|/)
+    - --collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs|erofs)$
+    - --collector.textfile.directory=/host/root/var/lib/node_exporter/textfile_collector
+</code></pre></div>
+<h3>Regla 2: vigilar al vigilante</h3>
+<p>Un exportador que dejó de correr no avisa nada, y la regla 1 se queda en silencio justo cuando más
+importa. Por eso el script publica <code>kubeadm_cert_exporter_last_run_timestamp_seconds</code>, y una segunda regla
+avisa si un nodo no reporta hace más de 3 horas, o si ninguno reporta (<code>noDataState: Alerting</code>).</p>
+<h3>Las reglas en Grafana</h3>
+<p>Las tres reglas van en un solo archivo de
+<a href="https://grafana.com/docs/grafana/latest/alerting/set-up/provision-alerting-resources/file-provisioning/" target="_blank" rel="noopener">provisioning de Grafana</a>,
+versionable y revisable por PR. La primera, recortada:</p>
+<div class="codeblock"><div class="codeblock__label">yaml</div><pre><code>- uid: kubeadm-cert-expiring
+  title: Certificado de kubeadm por vencer
+  condition: B
+  data:
+    - refId: A
+      datasourceUid: prometheus
+      relativeTimeRange: { from: 600, to: 0 }
+      model:
+        instant: true
+        expr: |
+          (min by (host, cert, kind) (kubeadm_cert_not_after_seconds{kind!~&quot;ca|kubelet-serving&quot;}) - time()) / 86400
+    - refId: B
+      datasourceUid: __expr__
+      model:
+        type: threshold
+        expression: A
+        conditions:
+          - evaluator: { type: lt, params: [30] }
+  for: 1h
+  labels:
+    severity: warning
+  annotations:
+    summary: &quot;{{ $labels.cert }} en {{ $labels.host }} vence en {{ humanize $values.A.Value }} días&quot;
+</code></pre></div>
+<p>Se excluyen las CA (diez años; merecen su propio recordatorio con meses de anticipación) y el serving cert
+autofirmado del kubelet (vencido por diseño, como vimos).</p>
+<p><strong>¿Por qué 30 días?</strong> Porque es el umbral más alto que no molesta a un kubelet sano. El kubelet pide un
+certificado nuevo cuando le queda <em>"between 30% and 10% of the time remaining"</em>
+(<a href="https://kubernetes.io/docs/tasks/tls/certificate-rotation/" target="_blank" rel="noopener">Certificate rotation</a>): con certificados de un
+año, rota con al menos 36 días de margen. En el cluster de ejemplo rotaron con el 30 % y el 22 % de vida
+restante. Si un <code>kubelet-client</code> baja de 30 días, la rotación está rota y quieres saberlo. Y un mes alcanza
+para pedir una ventana de cambios.</p>
+</section>
+<section id="la-prueba"><h2>La prueba</h2>
+<p>Para no instalar nada en el cluster, armamos un laboratorio local con docker compose: node_exporter con el
+textfile collector, Prometheus y Grafana con las tres reglas provisionadas. Se alimenta de dos fuentes:</p>
+<ul>
+<li><strong>Nodos reales sin escribir nada en ellos.</strong> El script tiene un modo <code>--stdout</code> que solo imprime; corrido
+  por SSH, trae las métricas de cada nodo al laboratorio:</li>
+</ul>
+<p><code>bash
+  ssh root@&lt;nodo&gt; 'HOST_LABEL=cp-1 bash -s -- --stdout' &lt; kubeadm-cert-exporter.sh &gt; textfile/cp-1.prom</code></p>
+<ul>
+<li><strong>Un nodo de mentira</strong> con la misma estructura de archivos que kubeadm y certificados a 20 días, para ver
+  la alerta disparar sin esperar un año.</li>
+</ul>
+<p>Resultado:</p>
+<div class="codeblock"><div class="codeblock__label">text</div><pre><code>== Días hasta el vencimiento (Prometheus)
+  cp-1       kubelet-serving            kubelet-serving    -161.2 d
+  lab-cp-1   apiserver                  leaf                 20.0 d
+  lab-cp-1   scheduler.conf             kubeconfig           20.0 d
+  worker-1   kubelet-client             kubelet-client      121.5 d
+  cp-1       apiserver                  leaf                356.9 d
+  ...
+
+== Reglas de Grafana
+  [firing  ] Certificado de kubeadm por vencer
+      -&gt; apiserver en lab-cp-1 vence en 20 días
+      -&gt; etcd-server en lab-cp-1 vence en 20 días
+      -&gt; scheduler.conf en lab-cp-1 vence en 20 días
+  [inactive] Exportador de certificados sin datos
+  [inactive] Cliente del apiserver con certificado por vencer
+</code></pre></div>
+<p>Dispara para los tres certificados de prueba y para ninguno de los reales. Al envejecer a mano el
+<code>last_run</code> de un nodo, la regla 2 también disparó (<em>"El exportador de certificados de worker-1 no corre
+hace más de 3 h"</em>). Las mismas reglas en formato Prometheus tienen tests con <code>promtool test rules</code> que
+cubren los casos límite: CA y serving cert excluidos, exportador ausente e histograma con y sin pedidos en
+el bucket de 30 días.</p>
+<p>El paso a paso para reproducirlo está en el
+<a href="https://github.com/agustin130a/tech-articles/tree/main/kubeadm-cert-expiry" target="_blank" rel="noopener">README del repo</a>.</p>
+</section>
+<section id="lo-que-nos-llevamos"><h2>Lo que nos llevamos</h2>
+<ul>
+<li><strong>Anota la fecha.</strong> <code>sudo kubeadm certs check-expiration</code> en cada control plane te dice cuánto te queda.</li>
+<li><strong>Actualiza al menos una vez por año</strong>, o automatiza la renovación. Si no haces ninguna de las dos, la
+  fecha te encuentra a ti.</li>
+<li><strong>Renovar no es terminar.</strong> Hazlo en todos los control planes, de a uno, reinicia apiserver, scheduler
+  y controller-manager, y verifica cada apiserver por su IP.</li>
+<li><strong>No repartas <code>admin.conf</code>.</strong> Es lo primero que se rompe y lo que más copias tiene.</li>
+<li><strong>Empieza por la alerta que no instala nada</strong>: el bucket de 30 días del histograma del apiserver ve lo
+  que los componentes tienen cargado en memoria.</li>
+<li><strong>Completa con el exportador</strong> para los certificados de servidor, y vigila que el exportador siga
+  corriendo.</li>
+<li><strong>Comprueba que las alertas lleguen a una persona.</strong> Una regla que dispara contra un receiver <code>null</code> es
+  lo mismo que no tenerla.</li>
+<li><strong>Decide qué hacer con el serving cert del kubelet</strong>, aunque la respuesta sea "nada, a conciencia".</li>
+</ul>
+</section>
+<section id="fuentes"><h2>Fuentes</h2>
+<ul>
+<li><a href="https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-certs/" target="_blank" rel="noopener">Certificate Management with kubeadm</a></li>
+<li><a href="https://kubernetes.io/docs/setup/best-practices/certificates/" target="_blank" rel="noopener">PKI certificates and requirements</a></li>
+<li><a href="https://kubernetes.io/docs/tasks/tls/certificate-rotation/" target="_blank" rel="noopener">Configure Certificate Rotation for the Kubelet</a></li>
+<li><a href="https://kubernetes.io/docs/reference/access-authn-authz/kubelet-tls-bootstrapping/#client-and-serving-certificates" target="_blank" rel="noopener">TLS bootstrapping: client and serving certificates</a></li>
+<li><a href="https://kubernetes.io/docs/concepts/architecture/control-plane-node-communication/" target="_blank" rel="noopener">Control plane to node communication</a></li>
+<li><a href="https://kubernetes.io/docs/reference/access-authn-authz/authentication/#x509-client-certificates" target="_blank" rel="noopener">Authenticating: X509 client certificates</a></li>
+<li><a href="https://kubernetes.io/docs/reference/instrumentation/metrics/" target="_blank" rel="noopener">Kubernetes Metrics Reference</a></li>
+<li><a href="https://github.com/prometheus/node_exporter#textfile-collector" target="_blank" rel="noopener">node_exporter: Textfile Collector</a></li>
+<li><a href="https://grafana.com/docs/grafana/latest/alerting/set-up/provision-alerting-resources/file-provisioning/" target="_blank" rel="noopener">Grafana: provisioning de alertas por archivo</a></li>
+<li><a href="https://github.com/prometheus-community/helm-charts/blob/main/charts/kube-prometheus-stack/values.yaml" target="_blank" rel="noopener">kube-prometheus-stack: values</a></li>
+<li><a href="https://github.com/enix/x509-certificate-exporter" target="_blank" rel="noopener">x509-certificate-exporter</a>, alternativa en DaemonSet que también lee kubeconfigs</li>
+</ul></section>
+  </article>
+</div>
+
+<footer class="end">
+  Código, alertas y laboratorio: <a href="https://github.com/agustin130a/tech-articles/tree/main/kubeadm-cert-expiry" target="_blank" rel="noopener">tech-articles/kubeadm-cert-expiry</a> · MIT
+</footer>
+
+</body>
+</html>
