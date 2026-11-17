@@ -1,0 +1,1806 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Taller en minikube para entender un repo GitOps con Kustomize, variables de Flux y HelmReleases con valuesFrom, con los archivos y la salida real de cada paso.">
+<title>Kustomize sin miedo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+body { margin: 0; }
+
+/* Layout: masthead + índice lateral fijo + columna de lectura, igual que el resto de la serie.
+   Color: cada herramienta del pipeline tiene su color y se repite en todo el artículo:
+   azul = Kustomize (render), ámbar = kustomize-controller (${VAR} y apply), verde = helm-controller. */
+:root {
+  --bg: #f3f5f8; --surface: #ffffff; --surface-2: #e8ecf1;
+  --ink: #121a23; --ink-soft: #434f5c; --ink-faint: #5f6c79; --line: #d0d8e0;
+  --accent: #2259a6; --accent-strong: #1b4a8c; --accent-soft: #e3edfa;
+  --k: #2259a6; --k-soft: #e3edfa; --k-fg: #173f78;
+  --s: #a86400; --s-soft: #fbefd9; --s-fg: #683e00;
+  --h: #18805f; --h-soft: #dcf3ea; --h-fg: #0e5540;
+  --g: #6c7986; --g-soft: #eceff3; --g-fg: #3c4651;
+  --code-bg: #0f161d; --code-ink: #dbe6ee; --code-faint: #8a9aa6; --code-var: #f2b55c; --code-key: #9cc4f2;
+  --code-hl: rgba(242, 181, 92, 0.17); --code-del: #f3a3a3; --code-add: #93dcae; --code-exit: #ff9b8a;
+  --shadow: 0 1px 2px rgba(15,23,32,.06), 0 10px 24px -14px rgba(15,23,32,.25);
+  --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0c1117; --surface: #131a21; --surface-2: #1a232c;
+  --ink: #e4eaf0; --ink-soft: #a9b5c0; --ink-faint: #808d99; --line: #26313b;
+  --accent: #6ea6ee; --accent-strong: #93bdf3; --accent-soft: #142640;
+  --k: #6ea6ee; --k-soft: #142640; --k-fg: #c4dbfa;
+  --s: #f0a83a; --s-soft: #36260c; --s-fg: #f6d8a4;
+  --h: #4fc79f; --h-soft: #0f2e24; --h-fg: #b5ecd8;
+  --g: #8995a1; --g-soft: #1d252d; --g-fg: #c6ced6;
+  --code-bg: #070b10; --code-ink: #d6e4ee; --code-faint: #7d8e9c; --code-var: #f2b55c; --code-key: #9cc4f2;
+  --code-hl: rgba(242, 181, 92, 0.16); --code-del: #f3a3a3; --code-add: #93dcae; --code-exit: #ff9b8a;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 14px 30px -16px rgba(0,0,0,.6);
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #0c1117; --surface: #131a21; --surface-2: #1a232c;
+  --ink: #e4eaf0; --ink-soft: #a9b5c0; --ink-faint: #808d99; --line: #26313b;
+  --accent: #6ea6ee; --accent-strong: #93bdf3; --accent-soft: #142640;
+  --k: #6ea6ee; --k-soft: #142640; --k-fg: #c4dbfa;
+  --s: #f0a83a; --s-soft: #36260c; --s-fg: #f6d8a4;
+  --h: #4fc79f; --h-soft: #0f2e24; --h-fg: #b5ecd8;
+  --g: #8995a1; --g-soft: #1d252d; --g-fg: #c6ced6;
+  --code-bg: #070b10; --code-ink: #d6e4ee; --code-faint: #7d8e9c; --code-var: #f2b55c; --code-key: #9cc4f2;
+  --code-hl: rgba(242, 181, 92, 0.16); --code-del: #f3a3a3; --code-add: #93dcae; --code-exit: #ff9b8a;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 14px 30px -16px rgba(0,0,0,.6);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--serif); font-size: 17px; line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+a { color: var(--accent-strong); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+h1, h2, h3 { font-family: var(--mono); font-weight: 600; text-wrap: balance; letter-spacing: -0.01em; color: var(--ink); }
+code { font-family: var(--mono); font-size: 0.86em; background: var(--surface-2); padding: 0.08em 0.38em; border-radius: 4px; overflow-wrap: anywhere; }
+
+/* Stage colors: one class sets --c for any element */
+.st-k { --c: var(--k); --c-soft: var(--k-soft); --c-fg: var(--k-fg); }
+.st-s { --c: var(--s); --c-soft: var(--s-soft); --c-fg: var(--s-fg); }
+.st-h { --c: var(--h); --c-soft: var(--h-soft); --c-fg: var(--h-fg); }
+.st-g { --c: var(--g); --c-soft: var(--g-soft); --c-fg: var(--g-fg); }
+
+/* Masthead */
+.masthead { max-width: 1180px; margin: 0 auto; padding-block: 3rem 2.2rem; border-bottom: 1px solid var(--line); }
+.eyebrow { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--accent-strong); display: flex; align-items: center; gap: 0.55rem; margin-bottom: 1rem; }
+.eyebrow__dots { display: inline-flex; gap: 4px; }
+.eyebrow__dots i { width: 8px; height: 8px; border-radius: 2px; background: var(--c); }
+.masthead h1 { font-size: clamp(1.9rem, 4.2vw, 3rem); line-height: 1.07; margin: 0 0 0.9rem; max-width: 22ch; }
+.dek { font-size: 1.12rem; color: var(--ink-soft); max-width: 64ch; margin: 0 0 1.4rem; }
+.meta-row { display: flex; flex-wrap: wrap; gap: 0.4rem 1.6rem; font-family: var(--mono); font-size: 0.78rem; color: var(--ink-faint); }
+.meta-row strong { color: var(--ink-soft); font-weight: 600; }
+
+/* Layout */
+.layout { max-width: 1180px; margin: 0 auto; padding-block: 2.4rem 4rem;
+  display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 3rem; align-items: start; }
+nav.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 1.5rem); display: flex; flex-direction: column;
+  gap: 0.1rem; font-family: var(--mono); font-size: 0.8rem; max-height: calc(100vh - 3rem); overflow-y: auto; }
+nav.toc .toc-label { font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 0.5rem; }
+nav.toc a { color: var(--ink-soft); text-decoration: none; padding: 0.35rem 0 0.35rem 0.7rem; border-left: 2px solid var(--line); }
+nav.toc a:hover { color: var(--accent-strong); border-color: var(--accent); }
+nav.toc .toc-sub { display: flex; flex-direction: column; }
+nav.toc .toc-sub a { padding: 0.22rem 0 0.22rem 1.4rem; font-size: 0.76rem; }
+nav.toc .toc-sub a:hover { border-color: var(--c); }
+article { min-width: 0; }
+section { padding-bottom: 2.6rem; scroll-margin-top: 1.2rem; }
+section + section { border-top: 1px solid var(--line); padding-top: 2.6rem; }
+h2 { font-size: 1.45rem; margin: 0 0 1rem; }
+h3 { font-size: 1.02rem; margin: 1.8rem 0 0.6rem; }
+h4 { font-family: var(--mono); font-size: 0.9rem; font-weight: 600; margin: 1.4rem 0 0.4rem; }
+p, ul, ol { max-width: 68ch; }
+p { margin: 0 0 1.05rem; }
+ul, ol { padding-left: 1.3rem; margin: 0 0 1.2rem; }
+li { margin-bottom: 0.4rem; }
+.lede-strong { font-size: 1.06rem; color: var(--ink); }
+.note { font-size: 0.92rem; color: var(--ink-soft); }
+
+/* Code */
+.codeblock { background: var(--code-bg); border-radius: 10px; box-shadow: var(--shadow); margin: 1rem 0 1.5rem; max-width: 80ch; overflow: hidden; min-width: 0; }
+.codeblock__label { font-family: var(--mono); font-size: 0.76rem; color: var(--code-faint); padding: 0.55rem 1rem 0; overflow-wrap: anywhere; }
+.codeblock pre { margin: 0; padding: 0.55rem 1.1rem 1rem; overflow-x: auto; }
+.codeblock code { background: none; padding: 0; font-size: 0.82rem; line-height: 1.65; color: var(--code-ink); white-space: pre; overflow-wrap: normal; }
+.codeblock .c { color: var(--code-faint); }
+.codeblock .v { color: var(--code-var); }
+.codeblock .k { color: var(--code-key); }
+.codeblock .p { color: var(--code-faint); user-select: none; }
+.codeblock .hl { background: var(--code-hl); border-radius: 3px; box-shadow: 0 0 0 2px var(--code-hl); }
+.codeblock .dm { color: var(--code-del); }
+.codeblock .dp { color: var(--code-add); }
+.codeblock .exit { color: var(--code-exit); margin-left: 0.4rem; }
+
+/* Chips */
+.chip { display: inline-flex; align-items: center; gap: 0.4rem; font-family: var(--mono); font-size: 0.76rem; line-height: 1.3;
+  padding: 0.16rem 0.55rem; border-radius: 6px; border: 1px solid var(--c); background: var(--c-soft); color: var(--c-fg); white-space: nowrap; }
+.chip::before { content: ""; width: 7px; height: 7px; border-radius: 2px; background: var(--c); flex: none; }
+.chip--plain { --c: var(--line); --c-soft: var(--surface); --c-fg: var(--ink-soft); }
+.chip--plain::before { display: none; }
+.legend { display: flex; flex-wrap: wrap; gap: 0.5rem 0.6rem; margin: 0 0 1.5rem; }
+
+/* Pipeline track */
+.track { list-style: none; padding: 0; margin: 1.4rem 0 2rem; max-width: 820px; }
+.stage { display: grid; grid-template-columns: 2.6rem minmax(0, 1fr); column-gap: 1rem; position: relative; padding-bottom: 1.1rem; margin: 0; }
+.stage:not(:last-child)::before { content: ""; position: absolute; left: calc(1.3rem - 1px); top: 2.8rem; bottom: 0.2rem; border-left: 2px solid var(--line); }
+.stage__node { width: 2.6rem; height: 2.6rem; border-radius: 50%; border: 2px solid var(--c); background: var(--c-soft); color: var(--c-fg);
+  display: grid; place-items: center; font-family: var(--mono); font-weight: 700; font-size: 0.95rem; position: relative; z-index: 1; }
+.stage__body { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 0.9rem 1.1rem 1rem; min-width: 0; }
+.stage__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.7rem; margin-bottom: 0.6rem; }
+.stage__head h3 { margin: 0; font-size: 1.02rem; color: var(--c-fg); }
+.stage__head span { font-family: var(--mono); font-size: 0.78rem; color: var(--ink-faint); }
+.io { display: grid; grid-template-columns: 4.2rem minmax(0, 1fr); gap: 0.35rem 0.8rem; margin: 0; font-size: 0.94rem; }
+.io dt { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); padding-top: 0.22rem; }
+.io dd { margin: 0; min-width: 0; }
+.bites { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; margin-top: 0.8rem; padding-top: 0.7rem; border-top: 1px dashed var(--line);
+  font-family: var(--mono); font-size: 0.76rem; color: var(--ink-faint); }
+.bites a { display: inline-grid; place-items: center; min-width: 1.6rem; height: 1.6rem; padding: 0 0.3rem; border-radius: 999px; border: 1.5px solid var(--c);
+  color: var(--c-fg); background: var(--c-soft); text-decoration: none; font-weight: 700; font-size: 0.76rem; }
+.bites a:hover { background: var(--c); color: var(--surface); }
+
+/* Tables */
+.table-wrap { overflow-x: auto; margin: 1rem 0 1.6rem; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; line-height: 1.45; }
+th, td { text-align: left; vertical-align: top; padding: 0.6rem 0.8rem; border-bottom: 1px solid var(--line); }
+th { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); font-weight: 600; background: var(--surface-2); }
+tr:last-child td { border-bottom: 0; }
+.trace { min-width: 720px; }
+.trace th .chip { text-transform: none; letter-spacing: 0; }
+.trace td:first-child { font-family: var(--mono); font-weight: 600; font-size: 0.82rem; white-space: nowrap; }
+.trace td code { white-space: nowrap; }
+.trace .win { display: block; margin-top: 0.25rem; font-family: var(--mono); font-size: 0.76rem; color: var(--h-fg); }
+.trace .same { color: var(--ink-faint); font-style: italic; font-size: 0.86rem; }
+figure { margin: 1.4rem 0 1.8rem; }
+figcaption { font-size: 0.88rem; color: var(--ink-faint); margin-top: 0.6rem; max-width: 72ch; }
+
+/* Workshop index */
+.steps { list-style: none; padding: 0; margin: 1.2rem 0 1.2rem; max-width: 820px; display: grid; gap: 0; border-top: 1px solid var(--line); }
+.steps li { margin: 0; border-bottom: 1px solid var(--line); }
+.steps li > a { display: grid; grid-template-columns: 2.2rem minmax(0, 1fr) 9rem; gap: 0.3rem 1rem; align-items: baseline; padding: 0.7rem 0.4rem; color: inherit; text-decoration: none; border-radius: 6px; }
+.steps li > a:hover { background: var(--surface); }
+.steps .no { font-family: var(--mono); font-weight: 700; font-size: 0.82rem; color: var(--c-fg); }
+.steps .what b { font-family: var(--mono); font-size: 0.9rem; font-weight: 600; display: block; color: var(--ink); }
+.steps .what span { font-size: 0.93rem; color: var(--ink-soft); }
+.steps .dur { display: grid; grid-template-columns: minmax(0, 1fr) 3rem; align-items: center; gap: 0.5rem; font-family: var(--mono); font-size: 0.78rem;
+  color: var(--ink-faint); font-variant-numeric: tabular-nums; align-self: center; }
+.steps .bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.steps .bar i { display: block; height: 100%; background: var(--c); border-radius: 3px; }
+.run-note { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin: 0 0 1rem; }
+
+/* Step sections */
+.step__eyebrow { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.8rem; margin-bottom: 0.7rem;
+  font-family: var(--mono); font-size: 0.78rem; color: var(--ink-faint); }
+.step__eyebrow b { color: var(--c-fg); font-weight: 700; }
+.objective { font-size: 1.06rem; color: var(--ink); }
+.observe { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 0.8rem 1.1rem 0.3rem; margin: 0.4rem 0 1.4rem; max-width: 80ch; }
+.observe > b { display: block; font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--c-fg); margin-bottom: 0.4rem; }
+.observe ul { margin-bottom: 0.6rem; }
+.think { border: 1px dashed var(--c); border-radius: 10px; padding: 0.7rem 1rem; max-width: 80ch; margin: 1.4rem 0 0; font-size: 0.95rem; }
+.think b { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--c-fg); margin-right: 0.4rem; }
+details.files { max-width: 80ch; margin: 0.6rem 0 1.4rem; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+details.files > summary { cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 0.8rem;
+  padding: 0.6rem 1rem; font-family: var(--mono); font-size: 0.84rem; font-weight: 600; color: var(--ink); }
+details.files > summary::-webkit-details-marker { display: none; }
+details.files > summary::before { content: "▸"; color: var(--ink-faint); transition: transform .15s; }
+details.files[open] > summary::before { transform: rotate(90deg); }
+details.files > summary span { margin-left: auto; font-weight: 400; font-size: 0.76rem; color: var(--ink-faint); }
+details.files > .codeblock { margin: 0 0.7rem 0.7rem; box-shadow: none; }
+.pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 0.9rem; max-width: 80ch; }
+.pair > .codeblock { margin-top: 0.4rem; }
+.phase { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 0.7rem; margin: 2rem 0 0.5rem; }
+.phase h3 { margin: 0; }
+.phase span { font-family: var(--mono); font-size: 0.78rem; color: var(--ink-faint); }
+
+/* Detail cards */
+.details { display: grid; gap: 1.3rem; margin-top: 1.4rem; }
+.detail { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 1.1rem 1.25rem 0.4rem; scroll-margin-top: 1.2rem; min-width: 0; }
+.detail:target { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.detail__head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.8rem; margin-bottom: 0.9rem; }
+.detail__no { font-family: var(--mono); font-weight: 700; font-size: 0.85rem; width: 1.9rem; height: 1.9rem; border-radius: 50%;
+  display: inline-grid; place-items: center; border: 1.5px solid var(--ink-faint); color: var(--ink); flex: none; }
+.detail__head h3 { margin: 0; font-size: 1.06rem; flex: 1 1 18rem; min-width: 0; }
+.detail__tags { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.qa { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.7rem; margin: 0 0 1.1rem; }
+.qa > div { background: var(--surface-2); border-radius: 8px; padding: 0.6rem 0.8rem; font-size: 0.93rem; line-height: 1.5; min-width: 0; }
+.qa b { display: block; font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint); font-weight: 600; margin-bottom: 0.2rem; }
+.detail .codeblock { max-width: none; }
+.seealso { font-family: var(--mono); font-size: 0.78rem; color: var(--ink-faint); margin: -0.2rem 0 1rem; }
+
+/* Layers (detalle 2) */
+.layers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.8rem; margin: 1rem 0 0.4rem; }
+.layer { background: var(--code-bg); border-radius: 10px; overflow: hidden; min-width: 0; }
+.layer__label { font-family: var(--mono); font-size: 0.76rem; color: var(--code-ink); padding: 0.55rem 0.9rem 0; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.layer__label::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--c); flex: none; }
+.layer__label span { color: var(--code-faint); margin-left: auto; }
+.layer pre { margin: 0; padding: 0.5rem 0.9rem 0.9rem; overflow-x: auto; }
+.layer code { background: none; padding: 0; color: var(--code-ink); font-size: 0.8rem; line-height: 1.7; white-space: pre; overflow-wrap: normal; }
+.o { font-size: 0.72rem; padding: 0 0.3rem; border-radius: 3px; }
+.o--env { color: #0f1a14; background: #6fd1ad; }
+.o--base { color: #0f1620; background: #a9c8ef; }
+
+/* Two things called Kustomization */
+.twins { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.8rem; margin: 0.4rem 0 1.2rem; }
+.twin { border: 1px solid var(--c); background: var(--c-soft); border-radius: 10px; padding: 0.8rem 1rem; min-width: 0; }
+.twin h4 { margin: 0 0 0.15rem; font-family: var(--mono); font-size: 0.92rem; color: var(--c-fg); overflow-wrap: anywhere; }
+.twin .who { font-family: var(--mono); font-size: 0.76rem; color: var(--ink-faint); margin-bottom: 0.5rem; display: block; overflow-wrap: anywhere; }
+.twin p { margin: 0; font-size: 0.93rem; }
+.twin p + p { margin-top: 0.45rem; }
+
+/* URLs */
+.urls { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0.5rem 1rem; margin: 0.4rem 0 1.4rem; max-width: 760px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 0.8rem 1rem; }
+.urls dt { font-family: var(--mono); font-size: 0.78rem; color: var(--ink-faint); padding-top: 0.15rem; }
+.urls dd { margin: 0; min-width: 0; }
+.urls code { overflow-wrap: anywhere; }
+
+/* Checks */
+.checks { list-style: none; padding: 0; margin: 1.2rem 0; max-width: 820px; display: grid; gap: 0.9rem; }
+.checks li { margin: 0; display: grid; grid-template-columns: 1.9rem minmax(0, 1fr); gap: 0 0.8rem; }
+.checks .n { font-family: var(--mono); font-weight: 700; font-size: 0.82rem; width: 1.9rem; height: 1.9rem; border-radius: 50%; border: 1.5px solid var(--ink-faint);
+  display: grid; place-items: center; }
+.checks .body { min-width: 0; }
+.checks .row { display: flex; flex-wrap: wrap; gap: 0.3rem 0.7rem; align-items: center; margin-bottom: 0.1rem; }
+.checks .row b { font-family: var(--mono); font-size: 0.9rem; font-weight: 600; }
+.checks .codeblock { margin: 0.45rem 0 0; }
+.checks .codeblock pre { padding-top: 0.75rem; }
+
+.repo { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.8rem 1.4rem; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 12px; padding: 1rem 1.2rem; max-width: 820px; margin: 0.6rem 0 1.2rem; }
+.repo a { font-family: var(--mono); font-weight: 600; font-size: 0.92rem; overflow-wrap: anywhere; }
+.repo span { font-family: var(--mono); font-size: 0.78rem; color: var(--ink-faint); }
+.versions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0 0 1rem; }
+
+.end { max-width: 1180px; margin: 0 auto; padding-block: 1.6rem 3rem; border-top: 1px solid var(--line);
+  font-family: var(--mono); font-size: 0.8rem; color: var(--ink-faint); }
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: minmax(0, 1fr); gap: 1.6rem; }
+  nav.toc { position: static; flex-direction: row; flex-wrap: wrap; gap: 0.3rem 0.4rem; max-height: none; overflow: visible; }
+  nav.toc .toc-label { flex-basis: 100%; }
+  nav.toc a, nav.toc .toc-sub a { border: 1px solid var(--line); border-radius: 999px; padding: 0.2rem 0.6rem; font-size: 0.76rem; }
+  nav.toc .toc-sub { display: contents; }
+  .layers, .pair { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 620px) {
+  body { font-size: 16px; }
+  .qa, .twins { grid-template-columns: minmax(0, 1fr); }
+  .steps li > a { grid-template-columns: 2rem minmax(0, 1fr); }
+  .steps .dur { grid-column: 2; }
+  .io { grid-template-columns: minmax(0, 1fr); gap: 0.1rem; }
+  .io dd { margin-bottom: 0.45rem; }
+  .urls { grid-template-columns: minmax(0, 1fr); gap: 0.1rem; }
+  .urls dd { margin-bottom: 0.5rem; }
+  .stage { grid-template-columns: 2.2rem minmax(0, 1fr); column-gap: 0.7rem; }
+  .stage__node { width: 2.2rem; height: 2.2rem; font-size: 0.85rem; }
+  .stage:not(:last-child)::before { left: calc(1.1rem - 1px); top: 2.4rem; }
+  .detail { padding-inline: 1rem; }
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } details.files > summary::before { transition: none; } }
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="eyebrow"><span class="eyebrow__dots"><i class="st-k"></i><i class="st-s"></i><i class="st-h"></i></span>Taller · Kustomize y Flux en minikube</div>
+  <h1>De ArgoCD a Flux: Kustomize sin miedo</h1>
+  <p class="dek">Taller en minikube para entender un repo GitOps con Kustomize, variables de Flux y HelmReleases con <code>valuesFrom</code>. Con los archivos y la salida real de cada paso.</p>
+  <div class="meta-row">
+    <span><strong>8 pasos</strong> · 90 a 110 min</span>
+    <span><strong>3 min</strong> de máquina</span>
+    <span>Salidas de la corrida del 17/11/2026</span>
+  </div>
+</header>
+
+<div class="layout">
+  <nav class="toc" aria-label="Índice">
+    <span class="toc-label">En este artículo</span>
+    <a href="#problema">El repo</a>
+    <a href="#orden">El orden</a>
+    <a href="#detalles">Los 6 detalles</a>
+    <a href="#taller">El taller paso a paso</a>
+    <div class="toc-sub">
+      <a class="st-k" href="#paso-1">1 · Qué es Kustomize</a>
+      <a class="st-k" href="#paso-2">2 · base y overlays</a>
+      <a class="st-k" href="#paso-3">3 · Generadores</a>
+      <a class="st-k" href="#paso-4">4 · merge y replace</a>
+      <a class="st-s" href="#paso-5">5 · Variables</a>
+      <a class="st-s" href="#paso-6">6 · Flux en minikube</a>
+      <a class="st-h" href="#paso-7">7 · HelmRelease</a>
+      <a class="st-g" href="#paso-8">8 · Cierre y validación</a>
+    </div>
+    <a href="#codigo">Código y versiones</a>
+  </nav>
+
+  <article>
+    <section id="problema">
+      <h2>Un repo GitOps que no se parece a ArgoCD</h2>
+      <p>En ArgoCD lo habitual es una <code>Application</code> raíz que crea otras, cada una con un chart y su <code>values.yaml</code>. Este repo de Flux se organiza así:</p>
+      <div class="codeblock">
+        <div class="codeblock__label">Estructura del repo</div>
+<pre><code>cluster-core-config/&lt;clúster&gt;/        <span class="c">cluster-vars.yaml + Kustomizations de Flux con postBuild.substituteFrom</span>
+cluster-services/base/                <span class="c">applications/ (HelmRelease por servicio), values/, sources/, manifests/</span>
+                                      <span class="c">kustomization.yaml con configMapGenerator</span>
+cluster-services/cluster-services-dev/
+                                      <span class="c">resources: [../base] + configMapGenerator con behavior: merge</span></code></pre>
+      </div>
+      <p>Cada HelmRelease lee sus values de dos claves de un ConfigMap:</p>
+      <div class="codeblock">
+        <div class="codeblock__label">HelmRelease · valuesFrom</div>
+<pre><code><span class="k">valuesFrom:</span>
+  - { kind: ConfigMap, name: values-mimir, valuesKey: base.yaml }
+  - { kind: ConfigMap, name: values-mimir, valuesKey: env.yaml, optional: true }</code></pre>
+      </div>
+      <p>Sobre los mismos archivos trabajan tres piezas, cada una en su turno: Kustomize, kustomize-controller (que además sustituye variables) y helm-controller. El taller reproduce esa estructura en ocho pasos, contra un clúster real.</p>
+    </section>
+
+    <section id="orden">
+      <h2>El orden en que pasan las cosas</h2>
+      <p class="lede-strong">Casi todos los errores de este repo vienen de esperar que un paso haga el trabajo de otro.</p>
+      <div class="legend" aria-label="Colores por herramienta">
+        <span class="chip st-k">Kustomize</span>
+        <span class="chip st-s">kustomize-controller</span>
+        <span class="chip st-h">helm-controller</span>
+      </div>
+
+      <ol class="track">
+        <li class="stage st-g">
+          <div class="stage__node" aria-hidden="true">Git</div>
+          <div class="stage__body">
+            <div class="stage__head"><h3>El repo</h3><span>lo que hay en el commit</span></div>
+            <dl class="io">
+              <dt>Tiene</dt><dd>La base (<code>configMapGenerator</code>, clave <code>base.yaml</code>), el overlay (clave <code>env.yaml</code>) y el ConfigMap <code>cluster-vars</code>.</dd>
+            </dl>
+          </div>
+        </li>
+        <li class="stage st-k">
+          <div class="stage__node" aria-hidden="true">1</div>
+          <div class="stage__body">
+            <div class="stage__head"><h3>Kustomize</h3><span>renderiza el overlay</span></div>
+            <dl class="io">
+              <dt>Hace</dt><dd>Aplica el overlay sobre la base. Con <code>behavior: merge</code> agrega <code>env.yaml</code> al ConfigMap que ya tiene <code>base.yaml</code>, sin combinarlas.</dd>
+              <dt>Sale</dt><dd>YAML plano, con los <code>${VAR}</code> intactos.</dd>
+            </dl>
+            <div class="bites">Dónde muerde <a href="#d1">1</a><a href="#d2">2</a><a href="#d6">6</a></div>
+          </div>
+        </li>
+        <li class="stage st-s">
+          <div class="stage__node" aria-hidden="true">2</div>
+          <div class="stage__body">
+            <div class="stage__head"><h3>kustomize-controller</h3><span>sustituye y aplica</span></div>
+            <dl class="io">
+              <dt>Hace</dt><dd>Reemplaza <code>${VAR}</code> con los valores de <code>cluster-vars</code> y aplica con prune.</dd>
+              <dt>Sale</dt><dd>El ConfigMap de values y el HelmRelease, en el clúster.</dd>
+            </dl>
+            <div class="bites">Dónde muerde <a href="#d3">3</a><a href="#d4">4</a><a href="#d6">6</a></div>
+          </div>
+        </li>
+        <li class="stage st-h">
+          <div class="stage__node" aria-hidden="true">3</div>
+          <div class="stage__body">
+            <div class="stage__head"><h3>helm-controller</h3><span>combina y hace upgrade</span></div>
+            <dl class="io">
+              <dt>Hace</dt><dd>Combina <code>base.yaml</code> y <code>env.yaml</code> (gana la última, con merge profundo) y hace <code>helm install</code> o <code>helm upgrade</code>.</dd>
+              <dt>Sale</dt><dd>Un release de Helm real.</dd>
+            </dl>
+            <div class="bites">Dónde muerde <a href="#d1">1</a><a href="#d2">2</a><a href="#d5">5</a></div>
+          </div>
+        </li>
+      </ol>
+
+      <h3>Un mismo valor, parada por parada</h3>
+      <p>Con los archivos del <a href="#paso-7">paso 7</a> (chart podinfo, clúster <code>minikube-dev</code>):</p>
+      <figure>
+        <div class="table-wrap">
+          <table class="trace">
+            <thead>
+              <tr>
+                <th>Campo</th>
+                <th>En Git</th>
+                <th><span class="chip st-k">tras Kustomize</span></th>
+                <th><span class="chip st-s">tras kustomize-controller</span></th>
+                <th><span class="chip st-h">en el release</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>ui.message</td>
+                <td>base: <code>podinfo en ${CLUSTER_NAME}</code></td>
+                <td class="same">sin cambios, dentro de la clave <code>base.yaml</code></td>
+                <td><code>podinfo en minikube-dev</code></td>
+                <td><code>podinfo en minikube-dev</code><span class="win">de base.yaml</span></td>
+              </tr>
+              <tr>
+                <td>ui.color</td>
+                <td>base: <code>#34577c</code><br>env: <code>#2e7d32</code></td>
+                <td>los dos, en claves distintas</td>
+                <td class="same">sin cambios</td>
+                <td><code>#2e7d32</code><span class="win">gana env.yaml</span></td>
+              </tr>
+              <tr>
+                <td>replicaCount</td>
+                <td>base: <code>1</code><br>env: <code>2</code></td>
+                <td>los dos, en claves distintas</td>
+                <td class="same">sin cambios</td>
+                <td><code>2</code><span class="win">gana env.yaml</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <figcaption>La única parada que combina valores es la última. Salida real en la <a href="#paso-7-b">fase B del paso 7</a>.</figcaption>
+      </figure>
+    </section>
+
+    <section id="detalles">
+      <h2>Los 6 detalles</h2>
+      <p>Lo que no se veía con <code>kubectl kustomize</code> y apareció en el clúster. Cada ficha enlaza al paso donde se ve.</p>
+
+      <div class="details">
+        <article class="detail" id="d1">
+          <div class="detail__head">
+            <span class="detail__no">1</span>
+            <h3>El hash que rompe el HelmRelease sin dar ningún error</h3>
+            <div class="detail__tags"><span class="chip st-k">Kustomize</span><span class="chip st-h">helm-controller</span></div>
+          </div>
+          <div class="qa">
+            <div><b>Qué pasa</b>El HelmRelease apunta a un ConfigMap que no existe y <code>kubectl kustomize</code> no avisa.</div>
+            <div><b>Qué hacer</b><code>generatorOptions.disableNameSuffixHash: true</code> en la base.</div>
+          </div>
+          <p><code>configMapGenerator</code> agrega un hash al nombre (<code>values-podinfo-6bdg5tmhf7</code>). Kustomize actualiza las referencias en los tipos que conoce, como un Deployment, pero no en un CRD como el HelmRelease. Existe <a href="https://github.com/kubernetes-sigs/kustomize/blob/master/examples/transformerconfigs/README.md"><code>configurations</code> con <code>nameReference</code></a> para enseñárselo, pero un nombre fijo es más simple.</p>
+          <p class="seealso">En el taller: <a href="#paso-3">paso 3</a>.</p>
+        </article>
+
+        <article class="detail" id="d2">
+          <div class="detail__head">
+            <span class="detail__no">2</span>
+            <h3><code>merge</code> no mezcla el YAML de adentro</h3>
+            <div class="detail__tags"><span class="chip st-k">Kustomize</span><span class="chip st-h">helm-controller</span></div>
+          </div>
+          <div class="qa">
+            <div><b>Qué pasa</b>Si el overlay repite una clave, reemplaza el valor entero de la base.</div>
+            <div><b>Qué hacer</b>Usar una clave nueva (<code>env.yaml</code>) y dejar el merge profundo a helm-controller.</div>
+          </div>
+          <p>El merge profundo lo hace helm-controller: combina las entradas de <code>valuesFrom</code> en orden y gana la última (<a href="https://fluxcd.io/flux/components/helm/helmreleases/#values-references">docs</a>).</p>
+          <div class="layers" role="group" aria-label="Diagrama de las dos capas de values">
+            <div class="layer st-k">
+              <div class="layer__label">base.yaml <span>base</span></div>
+<pre><code>replicaCount: 1
+ui:
+  message: "podinfo en <span class="v">${CLUSTER_NAME}</span>"
+  color: "#34577c"
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi</code></pre>
+            </div>
+            <div class="layer st-k">
+              <div class="layer__label">env.yaml <span>overlay dev</span></div>
+<pre><code>replicaCount: 2
+ui:
+  color: "#2e7d32"</code></pre>
+            </div>
+            <div class="layer st-h">
+              <div class="layer__label">combinado <span>helm-controller</span></div>
+<pre><code>replicaCount: 2           <span class="o o--env">env</span>
+ui:
+  color: "#2e7d32"        <span class="o o--env">env</span>
+  message: podinfo en minikube-dev
+                          <span class="o o--base">base</span>
+resources:                <span class="o o--base">base</span>
+  requests: …</code></pre>
+            </div>
+          </div>
+          <p class="seealso">En el taller: <a href="#paso-4">paso 4</a> (las dos claves) y <a href="#paso-7-b">paso 7, fase B</a> (el merge profundo).</p>
+        </article>
+
+        <article class="detail" id="d3">
+          <div class="detail__head">
+            <span class="detail__no">3</span>
+            <h3>Flux sustituye todo el texto, incluidos los comentarios</h3>
+            <div class="detail__tags"><span class="chip st-s">kustomize-controller</span></div>
+          </div>
+          <div class="qa">
+            <div><b>Qué pasa</b>Una variable que no existe queda como cadena vacía, sin error, también en comentarios.</div>
+            <div><b>Qué hacer</b>Correr <code>flux envsubst --strict</code> en local antes del PR.</div>
+          </div>
+          <p><code>postBuild.substituteFrom</code> reemplaza <code>${VAR}</code> sobre el YAML ya renderizado, incluido el contenido de los values dentro de un ConfigMap (<a href="https://fluxcd.io/flux/components/kustomize/kustomizations/#post-build-variable-substitution">docs</a>). Como trabaja sobre texto, no distingue un comentario de un valor.</p>
+          <p class="seealso">En el taller: <a href="#paso-5">paso 5</a>.</p>
+        </article>
+
+        <article class="detail" id="d4">
+          <div class="detail__head">
+            <span class="detail__no">4</span>
+            <h3>Los <code>${...}</code> de Grafana y Alloy se escapan con <code>$$</code></h3>
+            <div class="detail__tags"><span class="chip st-s">kustomize-controller</span></div>
+          </div>
+          <div class="qa">
+            <div><b>Qué pasa</b>Grafana arranca con un <code>client_secret</code> vacío y el reconcile no da ningún error.</div>
+            <div><b>Qué hacer</b>Escribir <code>$${VAR}</code> en todo <code>${...}</code> que no sea de Flux.</div>
+          </div>
+          <div class="codeblock">
+            <div class="codeblock__label">values de Grafana</div>
+<pre><code><span class="k">root_url:</span> "https://grafana.<span class="v">${CLUSTER_NAME}</span>.example.com"   <span class="c"># la sustituye Flux</span>
+<span class="k">client_secret:</span> "<span class="v">$${OAUTH_CLIENT_SECRET}</span>"                   <span class="c"># queda ${OAUTH_CLIENT_SECRET} para Grafana</span></code></pre>
+          </div>
+          <p class="seealso">En el taller: <a href="#paso-5">paso 5</a> (en local) y <a href="#paso-6">paso 6</a> (en el clúster).</p>
+        </article>
+
+        <article class="detail" id="d5">
+          <div class="detail__head">
+            <span class="detail__no">5</span>
+            <h3>Cambiar los values no dispara el upgrade</h3>
+            <div class="detail__tags"><span class="chip st-h">helm-controller</span></div>
+          </div>
+          <div class="qa">
+            <div><b>Qué pasa</b>El ConfigMap cambió en el clúster, pero <code>helm history</code> sigue en la misma revisión.</div>
+            <div><b>Qué hacer</b>Label <code>reconcile.fluxcd.io/watch: Enabled</code> en <code>generatorOptions.labels</code>.</div>
+          </div>
+          <p>El HelmRelease no vigila sus ConfigMaps: los vuelve a leer en su <code>interval</code>. La label está entre las <a href="https://fluxcd.io/flux/components/helm/helmreleases/#recommended-settings">configuraciones recomendadas</a>, y con Kustomize se pone una sola vez.</p>
+          <p class="seealso">En el taller: <a href="#paso-7-c">paso 7, fase C</a>.</p>
+        </article>
+
+        <article class="detail" id="d6">
+          <div class="detail__head">
+            <span class="detail__no">6</span>
+            <h3>Dos cosas se llaman Kustomization</h3>
+            <div class="detail__tags"><span class="chip st-k">Kustomize</span><span class="chip st-s">kustomize-controller</span></div>
+          </div>
+          <div class="qa">
+            <div><b>Qué pasa</b>Dos recursos con <code>kind: Kustomization</code> hacen cosas distintas, y uno nunca llega al clúster.</div>
+            <div><b>Qué hacer</b>Mirar el <code>apiVersion</code>: <code>kustomize.config.k8s.io</code> es la receta de Kustomize; <code>kustomize.toolkit.fluxcd.io</code> es un objeto de Flux.</div>
+          </div>
+          <p class="seealso">En el taller: <a href="#en-el-cluster">paso 6, qué va al clúster y qué no</a>.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="taller">
+      <h2>El taller paso a paso</h2>
+      <p>Todo corre en una laptop. Cada paso trae sus archivos (desplegables), los comandos y la salida que importa. De los comandos que solo informan progreso (<code>apply</code>, <code>push</code>, <code>reconcile</code>) se muestra el comando, no la salida.</p>
+      <div class="run-note">
+        <span class="chip chip--plain">Salidas reales · 17/11/2026</span>
+        <span class="chip chip--plain">kubectl v1.37.2 · Kubernetes 1.35.1</span>
+        <span class="chip chip--plain">Helm v3.16.4 · Flux 2.10.0</span>
+      </div>
+      <ol class="steps">
+        <li class="st-k"><a href="#paso-1"><span class="no">01</span><span class="what"><b>Qué es Kustomize</b><span>YAML puro, sin plantillas, con transformaciones en capas.</span></span><span class="dur"><span class="bar"><i style="width:50%"></i></span>10 min</span></a></li>
+        <li class="st-k"><a href="#paso-2"><span class="no">02</span><span class="what"><b>base y overlays</b><span><code>namePrefix</code>, <code>namespace</code>, labels y patches.</span></span><span class="dur"><span class="bar"><i style="width:75%"></i></span>15 min</span></a></li>
+        <li class="st-k"><a href="#paso-3"><span class="no">03</span><span class="what"><b>Generadores</b><span><code>configMapGenerator</code>, <code>secretGenerator</code> y el sufijo hash.</span></span><span class="dur"><span class="bar"><i style="width:75%"></i></span>15 min</span></a></li>
+        <li class="st-k"><a href="#paso-4"><span class="no">04</span><span class="what"><b><code>behavior: merge</code> y <code>replace</code></b><span>La base genera <code>base.yaml</code> y el overlay agrega <code>env.yaml</code>.</span></span><span class="dur"><span class="bar"><i style="width:50%"></i></span>10 min</span></a></li>
+        <li class="st-s"><a href="#paso-5"><span class="no">05</span><span class="what"><b>Variables</b><span><code>replacements</code> frente a <code>${VAR}</code> de Flux.</span></span><span class="dur"><span class="bar"><i style="width:50%"></i></span>10 min</span></a></li>
+        <li class="st-s"><a href="#paso-6"><span class="no">06</span><span class="what"><b>Flux en minikube</b><span>Git server en el clúster y <code>postBuild.substituteFrom</code>.</span></span><span class="dur"><span class="bar"><i style="width:100%"></i></span>20 min</span></a></li>
+        <li class="st-h"><a href="#paso-7"><span class="no">07</span><span class="what"><b>HelmRelease + valuesFrom</b><span>El chart podinfo, con <code>env.yaml</code> pisando a <code>base.yaml</code>.</span></span><span class="dur"><span class="bar"><i style="width:75%"></i></span>15 min</span></a></li>
+        <li class="st-g"><a href="#paso-8"><span class="no">08</span><span class="what"><b>Cierre</b><span>Mapa del repo, ArgoCD, errores típicos y validación antes del PR.</span></span><span class="dur"><span class="bar"><i style="width:50%"></i></span>10 min</span></a></li>
+      </ol>
+      <h3>Preparar el clúster</h3>
+      <p>Solo lo usan el paso 3 (apply), el 6 y el 7. Un perfil propio evita tocar otros clústeres, y <code>kubectl kustomize</code> trae Kustomize embebido.</p>
+      <div class="codeblock"><div class="codeblock__label">perfil kustomize-ws · unos 20 s</div><pre><code><span class="p">$ </span>minikube start -p kustomize-ws --cpus 4 --memory 6g
+<span class="p">$ </span>kubectl config current-context   <span class="c"># debe decir kustomize-ws</span></code></pre></div>
+    </section>
+
+    <!-- ============================ PASO 1 ============================ -->
+    <section id="paso-1" class="st-k">
+      <div class="step__eyebrow"><b>Paso 1</b><span>10 min</span><span class="chip">Kustomize</span><span class="chip chip--plain">sin clúster</span></div>
+      <h2>Qué es Kustomize</h2>
+      <p class="objective">Renderizar el primer <code>kustomization.yaml</code>, sin clúster.</p>
+      <ul>
+        <li><strong>YAML copiado por entorno</strong>: cada cambio común se repite y los entornos divergen.</li>
+        <li><strong>Helm</strong>: plantillas Go y un <code>values.yaml</code> por entorno. Solo se cambia lo que el autor del chart parametrizó.</li>
+        <li><strong>Kustomize</strong>: YAML puro, sin plantillas. Una base y transformaciones en capas que pueden tocar cualquier campo.</li>
+      </ul>
+      <p>Viene embebido en <code>kubectl</code> (<code>kubectl kustomize</code>, <code>apply -k</code>) desde Kubernetes 1.14 (<a href="https://kubectl.docs.kubernetes.io/references/kustomize/kustomization/">docs</a>), y Flux lo usa para renderizar cada path.</p>
+      <div class="codeblock"><div class="codeblock__label">01-intro/app/kustomization.yaml</div><pre><code><span class="k">apiVersion</span>: kustomize.config.k8s.io/v1beta1
+<span class="k">kind</span>: Kustomization
+<span class="k">resources</span>:
+  - deployment.yaml
+  - service.yaml</code></pre></div>
+      <details class="files"><summary>deployment.yaml y service.yaml<span>2 archivos</span></summary><div class="codeblock"><div class="codeblock__label">01-intro/app/deployment.yaml</div><pre><code><span class="k">apiVersion</span>: apps/v1
+<span class="k">kind</span>: Deployment
+<span class="k">metadata</span>:
+  <span class="k">name</span>: podinfo
+<span class="k">spec</span>:
+  <span class="k">replicas</span>: 2
+  <span class="k">selector</span>:
+    <span class="k">matchLabels</span>:
+      <span class="k">app</span>: podinfo
+  <span class="k">template</span>:
+    <span class="k">metadata</span>:
+      <span class="k">labels</span>:
+        <span class="k">app</span>: podinfo
+    <span class="k">spec</span>:
+      <span class="k">containers</span>:
+        - <span class="k">name</span>: podinfo
+          <span class="k">image</span>: ghcr.io/stefanprodan/podinfo:6.7.1
+          <span class="k">ports</span>:
+            - <span class="k">containerPort</span>: 9898
+          <span class="k">resources</span>:
+            <span class="k">requests</span>: {cpu: 10m, memory: 32Mi}</code></pre></div><div class="codeblock"><div class="codeblock__label">01-intro/app/service.yaml</div><pre><code><span class="k">apiVersion</span>: v1
+<span class="k">kind</span>: Service
+<span class="k">metadata</span>:
+  <span class="k">name</span>: podinfo
+<span class="k">spec</span>:
+  <span class="k">selector</span>:
+    <span class="k">app</span>: podinfo
+  <span class="k">ports</span>:
+    - <span class="k">port</span>: 80
+      <span class="k">targetPort</span>: 9898</code></pre></div></details>
+      <div class="codeblock"><div class="codeblock__label">kubectl kustomize · solo imprime, no toca el clúster</div><pre><code><span class="p">$ </span>kubectl kustomize 01-intro/app
+<span class="k">apiVersion</span>: v1
+<span class="hl"><span class="k">kind</span>: Service</span>
+<span class="k">metadata</span>:
+  <span class="k">name</span>: podinfo
+<span class="k">spec</span>:
+  <span class="k">ports</span>:
+  - <span class="k">port</span>: 80
+    <span class="k">targetPort</span>: 9898
+  <span class="k">selector</span>:
+    <span class="k">app</span>: podinfo
+---
+<span class="k">apiVersion</span>: apps/v1
+<span class="hl"><span class="k">kind</span>: Deployment</span>
+<span class="k">metadata</span>:
+  <span class="k">name</span>: podinfo
+<span class="k">spec</span>:
+  <span class="k">replicas</span>: 2
+  <span class="k">selector</span>:
+    <span class="k">matchLabels</span>:
+      <span class="k">app</span>: podinfo
+  <span class="k">template</span>:
+    <span class="k">metadata</span>:
+      <span class="k">labels</span>:
+        <span class="k">app</span>: podinfo
+    <span class="k">spec</span>:
+      <span class="k">containers</span>:
+      - <span class="k">image</span>: ghcr.io/stefanprodan/podinfo:6.7.1
+        <span class="k">name</span>: podinfo
+        <span class="k">ports</span>:
+        - <span class="k">containerPort</span>: 9898
+        <span class="k">resources</span>:
+          <span class="k">requests</span>:
+            <span class="k">cpu</span>: 10m
+            <span class="k">memory</span>: 32Mi</code></pre></div>
+      <div class="observe"><b>Qué observar</b>
+        <ul>
+          <li>Concatena los dos archivos y los reordena por tipo: el <code>Service</code> sale antes que el <code>Deployment</code>.</li>
+          <li>Contra los originales solo cambia el formato (orden de claves, sangría).</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ============================ PASO 2 ============================ -->
+    <section id="paso-2" class="st-k">
+      <div class="step__eyebrow"><b>Paso 2</b><span>15 min</span><span class="chip">Kustomize</span><span class="chip chip--plain">sin clúster</span></div>
+      <h2>base y overlays</h2>
+      <p class="objective">Una base y dos overlays (dev y prd) que la reutilizan con <code>resources: [../base]</code>.</p>
+      <p>Kustomize renderiza la base y aplica encima el overlay (<a href="https://kubectl.docs.kubernetes.io/references/kustomize/kustomization/">referencia</a>):</p>
+      <ul>
+        <li><code>namespace</code>: fuerza el namespace de todo.</li>
+        <li><code>namePrefix</code>: prefija los nombres y actualiza las referencias por nombre (<code>configMapRef</code>, <code>serviceAccountName</code>…).</li>
+        <li><code>commonLabels</code>: agrega labels también a los selectores. Deprecado a favor de <code>labels</code> (<a href="https://kubectl.docs.kubernetes.io/references/kustomize/kustomization/labels/">docs</a>).</li>
+        <li><code>patches</code>: modifica recursos puntuales (<a href="https://kubectl.docs.kubernetes.io/references/kustomize/kustomization/patches/">docs</a>).</li>
+      </ul>
+      <details class="files"><summary>La base (igual al paso 1)<span>3 archivos</span></summary><div class="codeblock"><div class="codeblock__label">02-base-overlays/base/kustomization.yaml</div><pre><code><span class="k">apiVersion</span>: kustomize.config.k8s.io/v1beta1
+<span class="k">kind</span>: Kustomization
+<span class="k">resources</span>:
+  - deployment.yaml
+  - service.yaml</code></pre></div><div class="codeblock"><div class="codeblock__label">02-base-overlays/base/deployment.yaml</div><pre><code><span class="k">apiVersion</span>: apps/v1
+<span class="k">kind</span>: Deployment
+<span class="k">metadata</span>:
+  <span class="k">name</span>: podinfo
+<span class="k">spec</span>:
+  <span class="k">replicas</span>: 2
+  <span class="k">selector</span>:
+    <span class="k">matchLabels</span>:
+      <span class="k">app</span>: podinfo
+  <span class="k">template</span>:
+    <span class="k">metadata</span>:
+      <span class="k">labels</span>:
+        <span class="k">app</span>: podinfo
+    <span class="k">spec</span>:
+      <span class="k">containers</span>:
+        - <span class="k">name</span>: podinfo
+          <span class="k">image</span>: ghcr.io/stefanprodan/podinfo:6.7.1
+          <span class="k">ports</span>:
+            - <span class="k">containerPort</span>: 9898
+          <span class="k">resources</span>:
+            <span class="k">requests</span>: {cpu: 10m, memory: 32Mi}</code></pre></div><div class="codeblock"><div class="codeblock__label">02-base-overlays/base/service.yaml</div><pre><code><span class="k">apiVersion</span>: v1
+<span class="k">kind</span>: Service
+<span class="k">metadata</span>:
+  <span class="k">name</span>: podinfo
+<span class="k">spec</span>:
+  <span class="k">selector</span>:
+    <span class="k">app</span>: podinfo
+  <span class="k">ports</span>:
+    - <span class="k">port</span>: 80
+      <span class="k">targetPort</span>: 9898</code></pre></div></details>
+      <div class="pair">
+        <div class="codeblock"><div class="codeblock__label">overlays/dev/kustomization.yaml</div><pre><code><span class="k">apiVersion</span>: kustomize.config.k8s.io/v1beta1
+<span class="k">kind</span>: Kustomization
+<span class="k">resources</span>:
+  - ../../base
+<span class="k">namespace</span>: dev
+<span class="k">namePrefix</span>: dev-
+<span class="k">commonLabels</span>:            <span class="c"># deprecado, ver README: también toca los selectores</span>
+  <span class="k">env</span>: dev
+<span class="k">patches</span>:
+  <span class="c"># Strategic merge patch: un "pedazo" del objeto con los campos a cambiar.</span>
+  - <span class="k">path</span>: replicas-patch.yaml</code></pre></div>
+        <div class="codeblock"><div class="codeblock__label">overlays/dev/replicas-patch.yaml</div><pre><code><span class="k">apiVersion</span>: apps/v1
+<span class="k">kind</span>: Deployment
+<span class="k">metadata</span>:
+  <span class="k">name</span>: podinfo
+<span class="k">spec</span>:
+  <span class="k">replicas</span>: 1
+  <span class="k">template</span>:
+    <span class="k">spec</span>:
+      <span class="k">containers</span>:
+        - <span class="k">name</span>: podinfo          <span class="c"># la lista se mergea por "name"</span>
+          <span class="k">env</span>:
+            - <span class="k">name</span>: PODINFO_UI_MESSAGE
+              <span class="k">value</span>: "hola desde dev"</code></pre></div>
+      </div>
+      <div class="codeblock"><div class="codeblock__label">overlays/prd/kustomization.yaml</div><pre><code><span class="k">apiVersion</span>: kustomize.config.k8s.io/v1beta1
+<span class="k">kind</span>: Kustomization
+<span class="k">resources</span>:
+  - ../../base
+<span class="k">namespace</span>: prd
+<span class="k">namePrefix</span>: prd-
+<span class="k">labels</span>:                  <span class="c"># reemplazo moderno de commonLabels</span>
+  - <span class="k">pairs</span>:
+      <span class="k">env</span>: prd
+    <span class="k">includeSelectors</span>: false
+<span class="k">patches</span>:
+  <span class="c"># JSON patch (RFC 6902): operaciones sobre rutas exactas.</span>
+  - <span class="k">target</span>:
+      <span class="k">kind</span>: Deployment
+      <span class="k">name</span>: podinfo
+    <span class="k">patch</span>: |-
+      - <span class="k">op</span>: replace
+        <span class="k">path</span>: /spec/replicas
+        <span class="k">value</span>: 3
+      - <span class="k">op</span>: add
+        <span class="k">path</span>: /spec/template/spec/containers/0/args
+        <span class="k">value</span>: ["--level=warn"]</code></pre></div>
+      <div class="codeblock"><div class="codeblock__label">diff dev ↔ prd</div><pre><code><span class="p">$ </span>diff &lt;(kubectl kustomize 02-base-overlays/overlays/dev 2&gt;/dev/null) &lt;(kubectl kustomize 02-base-overlays/overlays/prd)
+5,7c5,7
+<span class="dm">&lt;     env: dev</span>
+<span class="dm">&lt;   name: dev-podinfo</span>
+<span class="dm">&lt;   namespace: dev</span>
+---
+<span class="dp">&gt;     env: prd</span>
+<span class="dp">&gt;   name: prd-podinfo</span>
+<span class="dp">&gt;   namespace: prd</span>
+14d13
+<span class="dm">&lt;     env: dev</span>
+20,22c19,21
+<span class="dm">&lt;     env: dev</span>
+<span class="dm">&lt;   name: dev-podinfo</span>
+<span class="dm">&lt;   namespace: dev</span>
+---
+<span class="dp">&gt;     env: prd</span>
+<span class="dp">&gt;   name: prd-podinfo</span>
+<span class="dp">&gt;   namespace: prd</span>
+24c23
+<span class="dm">&lt;   replicas: 1</span>
+---
+<span class="dp">&gt;   replicas: 3</span>
+28d26
+<span class="dm">&lt;       env: dev</span>
+33d30
+<span class="dm">&lt;         env: dev</span>
+36,38c33,34
+<span class="dm">&lt;       - env:</span>
+<span class="dm">&lt;         - name: PODINFO_UI_MESSAGE</span>
+<span class="dm">&lt;           value: hola desde dev</span>
+---
+<span class="dp">&gt;       - args:</span>
+<span class="dp">&gt;         - --level=warn</span></code></pre></div>
+      <details class="files"><summary>render completo de dev<span>salida</span></summary><div class="codeblock"><div class="codeblock__label">render completo de dev</div><pre><code><span class="p">$ </span>kubectl kustomize 02-base-overlays/overlays/dev
+<span class="hl"><span class="c"># Warning: 'commonLabels' is deprecated. Please use 'labels' instead. Run 'kustomize edit fix' to update your Kustomization automatically.</span></span>
+<span class="k">apiVersion</span>: v1
+<span class="k">kind</span>: Service
+<span class="k">metadata</span>:
+  <span class="k">labels</span>:
+<span class="hl">    <span class="k">env</span>: dev</span>
+  <span class="k">name</span>: dev-podinfo
+  <span class="k">namespace</span>: dev
+<span class="k">spec</span>:
+  <span class="k">ports</span>:
+  - <span class="k">port</span>: 80
+    <span class="k">targetPort</span>: 9898
+  <span class="k">selector</span>:
+    <span class="k">app</span>: podinfo
+<span class="hl">    <span class="k">env</span>: dev</span>
+---
+<span class="k">apiVersion</span>: apps/v1
+<span class="k">kind</span>: Deployment
+<span class="k">metadata</span>:
+  <span class="k">labels</span>:
+<span class="hl">    <span class="k">env</span>: dev</span>
+  <span class="k">name</span>: dev-podinfo
+  <span class="k">namespace</span>: dev
+<span class="k">spec</span>:
+<span class="hl">  <span class="k">replicas</span>: 1</span>
+  <span class="k">selector</span>:
+    <span class="k">matchLabels</span>:
+      <span class="k">app</span>: podinfo
+<span class="hl">      <span class="k">env</span>: dev</span>
+  <span class="k">template</span>:
+    <span class="k">metadata</span>:
+      <span class="k">labels</span>:
+        <span class="k">app</span>: podinfo
+<span class="hl">        <span class="k">env</span>: dev</span>
+    <span class="k">spec</span>:
+      <span class="k">containers</span>:
+      - <span class="k">env</span>:
+        - <span class="k">name</span>: PODINFO_UI_MESSAGE
+<span class="hl">          <span class="k">value</span>: hola desde dev</span>
+        <span class="k">image</span>: ghcr.io/stefanprodan/podinfo:6.7.1
+        <span class="k">name</span>: podinfo
+        <span class="k">ports</span>:
+        - <span class="k">containerPort</span>: 9898
+        <span class="k">resources</span>:
+          <span class="k">requests</span>:
+            <span class="k">cpu</span>: 10m
+            <span class="k">memory</span>: 32Mi</code></pre></div></details>
+      <details class="files"><summary>render completo de prd<span>salida</span></summary><div class="codeblock"><div class="codeblock__label">render completo de prd</div><pre><code><span class="p">$ </span>kubectl kustomize 02-base-overlays/overlays/prd
+<span class="k">apiVersion</span>: v1
+<span class="k">kind</span>: Service
+<span class="k">metadata</span>:
+  <span class="k">labels</span>:
+<span class="hl">    <span class="k">env</span>: prd</span>
+  <span class="k">name</span>: prd-podinfo
+  <span class="k">namespace</span>: prd
+<span class="k">spec</span>:
+  <span class="k">ports</span>:
+  - <span class="k">port</span>: 80
+    <span class="k">targetPort</span>: 9898
+  <span class="k">selector</span>:
+    <span class="k">app</span>: podinfo
+---
+<span class="k">apiVersion</span>: apps/v1
+<span class="k">kind</span>: Deployment
+<span class="k">metadata</span>:
+  <span class="k">labels</span>:
+<span class="hl">    <span class="k">env</span>: prd</span>
+  <span class="k">name</span>: prd-podinfo
+  <span class="k">namespace</span>: prd
+<span class="k">spec</span>:
+<span class="hl">  <span class="k">replicas</span>: 3</span>
+  <span class="k">selector</span>:
+    <span class="k">matchLabels</span>:
+      <span class="k">app</span>: podinfo
+  <span class="k">template</span>:
+    <span class="k">metadata</span>:
+      <span class="k">labels</span>:
+        <span class="k">app</span>: podinfo
+    <span class="k">spec</span>:
+      <span class="k">containers</span>:
+      - <span class="k">args</span>:
+<span class="hl">        - --level=warn</span>
+        <span class="k">image</span>: ghcr.io/stefanprodan/podinfo:6.7.1
+        <span class="k">name</span>: podinfo
+        <span class="k">ports</span>:
+        - <span class="k">containerPort</span>: 9898
+        <span class="k">resources</span>:
+          <span class="k">requests</span>:
+            <span class="k">cpu</span>: 10m
+            <span class="k">memory</span>: 32Mi</code></pre></div></details>
+      <div class="observe"><b>Qué observar</b>
+        <ul>
+          <li><strong>dev</strong>: <code>commonLabels</code> pone <code>env: dev</code> también en los selectores (las líneas que no tiene prd). El selector de un Deployment es inmutable: cambiarlo en algo ya desplegado hace fallar el <code>apply</code>.</li>
+          <li><strong>dev</strong>: el strategic merge patch cambia <code>replicas</code> y agrega el <code>env</code> al contenedor <code>podinfo</code>, porque las listas de contenedores se combinan por <code>name</code>.</li>
+          <li><strong>prd</strong>: <code>labels</code> con <code>includeSelectors: false</code> deja los selectores intactos. El JSON patch (<a href="https://datatracker.ietf.org/doc/html/rfc6902">RFC 6902</a>) apunta a rutas exactas, y su <code>target.name</code> usa el nombre original (<code>podinfo</code>).</li>
+        </ul>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Strategic merge</th><th>JSON 6902</th></tr></thead>
+          <tbody>
+            <tr><td>YAML de Kubernetes, legible</td><td>Lista de operaciones <code>add/replace/remove</code></td></tr>
+            <tr><td>Combina listas por clave (<code>name</code>)</td><td>Usa índices (<code>/containers/0</code>): frágil si cambia el orden</td></tr>
+            <tr><td>Difícil borrar un elemento puntual</td><td><code>remove</code> borra exactamente lo indicado</td></tr>
+            <tr><td>En CRDs reemplaza las listas enteras</td><td>Igual en cualquier tipo, incluidos CRDs</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Regla práctica: strategic merge por defecto; JSON patch para borrar, para listas sin clave o para CRDs.</p>
+    </section>
+
+    <!-- ============================ PASO 3 ============================ -->
+    <section id="paso-3" class="st-k">
+      <div class="step__eyebrow"><b>Paso 3</b><span>15 min</span><span class="chip">Kustomize</span><span class="chip chip--plain">render sin clúster · apply en minikube</span></div>
+      <h2>Generadores y sufijo hash</h2>
+      <p class="objective">Generar ConfigMaps y Secrets, y ver qué hace el sufijo hash.</p>
+      <ul>
+        <li><code>files</code>: cada archivo es una clave (se renombra con <code>clave=ruta</code>).</li>
+        <li><code>envs</code>: cada línea <code>KEY=VALUE</code> es una clave.</li>
+        <li><code>literals</code>: <code>KEY=VALUE</code> inline (<a href="https://kubectl.docs.kubernetes.io/references/kustomize/kustomization/configmapgenerator/">docs</a>).</li>
+      </ul>
+      <p><code>secretGenerator</code> codifica en base64, pero <strong>no cifra</strong>. En un repo real se usa SOPS o External Secrets.</p>
+      <div class="pair">
+        <div class="codeblock"><div class="codeblock__label">app/kustomization.yaml</div><pre><code><span class="k">apiVersion</span>: kustomize.config.k8s.io/v1beta1
+<span class="k">kind</span>: Kustomization
+<span class="k">namespace</span>: generators
+<span class="k">resources</span>:
+  - namespace.yaml
+  - deployment.yaml
+<span class="k">configMapGenerator</span>:
+  - <span class="k">name</span>: podinfo-config
+    <span class="k">envs</span>:
+      - config/app.properties          <span class="c"># cada línea KEY=VALUE pasa a ser una clave</span>
+    <span class="k">literals</span>:
+      - PODINFO_UI_MESSAGE=version-1
+<span class="k">secretGenerator</span>:
+  - <span class="k">name</span>: podinfo-secret
+    <span class="k">literals</span>:
+      - API_TOKEN=no-es-un-secreto-real   <span class="c"># dato de juguete: en serio, nunca en Git</span></code></pre></div>
+        <div class="codeblock"><div class="codeblock__label">app/deployment.yaml</div><pre><code><span class="k">apiVersion</span>: apps/v1
+<span class="k">kind</span>: Deployment
+<span class="k">metadata</span>:
+  <span class="k">name</span>: podinfo
+<span class="k">spec</span>:
+  <span class="k">replicas</span>: 1
+  <span class="k">selector</span>:
+    <span class="k">matchLabels</span>: {app: podinfo}
+  <span class="k">template</span>:
+    <span class="k">metadata</span>:
+      <span class="k">labels</span>: {app: podinfo}
+    <span class="k">spec</span>:
+      <span class="k">containers</span>:
+        - <span class="k">name</span>: podinfo
+          <span class="k">image</span>: ghcr.io/stefanprodan/podinfo:6.7.1
+          <span class="k">envFrom</span>:
+            - <span class="k">configMapRef</span>:
+                <span class="k">name</span>: podinfo-config     <span class="c"># nombre "lógico": Kustomize le agrega el hash</span>
+            - <span class="k">secretRef</span>:
+                <span class="k">name</span>: podinfo-secret
+          <span class="k">resources</span>:
+            <span class="k">requests</span>: {cpu: 10m, memory: 32Mi}</code></pre></div>
+      </div>
+      <details class="files"><summary>app.properties y namespace.yaml<span>2 archivos</span></summary><div class="codeblock"><div class="codeblock__label">03-generators/app/config/app.properties</div><pre><code>PODINFO_UI_COLOR=#34577c</code></pre></div><div class="codeblock"><div class="codeblock__label">03-generators/app/namespace.yaml</div><pre><code><span class="k">apiVersion</span>: v1
+<span class="k">kind</span>: Namespace
+<span class="k">metadata</span>:
+  <span class="k">name</span>: generators</code></pre></div></details>
+      <div class="codeblock"><div class="codeblock__label">render</div><pre><code><span class="p">$ </span>kubectl kustomize 03-generators/app
+<span class="k">apiVersion</span>: v1
+<span class="k">kind</span>: Namespace
+<span class="k">metadata</span>:
+  <span class="k">name</span>: generators
+---
+<span class="k">apiVersion</span>: v1
+<span class="k">data</span>:
+  <span class="k">PODINFO_UI_COLOR</span>: '#34577c'
+  <span class="k">PODINFO_UI_MESSAGE</span>: version-1
+<span class="k">kind</span>: ConfigMap
+<span class="k">metadata</span>:
+<span class="hl">  <span class="k">name</span>: podinfo-config-8c2f6hg92d</span>
+  <span class="k">namespace</span>: generators
+---
+<span class="k">apiVersion</span>: v1
+<span class="k">data</span>:
+<span class="hl">  <span class="k">API_TOKEN</span>: bm8tZXMtdW4tc2VjcmV0by1yZWFs</span>
+<span class="k">kind</span>: Secret
+<span class="k">metadata</span>:
+<span class="hl">  <span class="k">name</span>: podinfo-secret-d7bg2bg98g</span>
+  <span class="k">namespace</span>: generators
+<span class="k">type</span>: Opaque
+---
+<span class="k">apiVersion</span>: apps/v1
+<span class="k">kind</span>: Deployment
+<span class="k">metadata</span>:
+  <span class="k">name</span>: podinfo
+  <span class="k">namespace</span>: generators
+<span class="k">spec</span>:
+  <span class="k">replicas</span>: 1
+  <span class="k">selector</span>:
+    <span class="k">matchLabels</span>:
+      <span class="k">app</span>: podinfo
+  <span class="k">template</span>:
+    <span class="k">metadata</span>:
+      <span class="k">labels</span>:
+        <span class="k">app</span>: podinfo
+    <span class="k">spec</span>:
+      <span class="k">containers</span>:
+      - <span class="k">envFrom</span>:
+        - <span class="k">configMapRef</span>:
+<span class="hl">            <span class="k">name</span>: podinfo-config-8c2f6hg92d</span>
+        - <span class="k">secretRef</span>:
+<span class="hl">            <span class="k">name</span>: podinfo-secret-d7bg2bg98g</span>
+        <span class="k">image</span>: ghcr.io/stefanprodan/podinfo:6.7.1
+        <span class="k">name</span>: podinfo
+        <span class="k">resources</span>:
+          <span class="k">requests</span>:
+            <span class="k">cpu</span>: 10m
+            <span class="k">memory</span>: 32Mi</code></pre></div>
+      <p><code>API_TOKEN</code> es solo el base64 de <code>no-es-un-secreto-real</code>.</p>
+
+      <h3>Aplicar, cambiar el literal y volver a aplicar</h3>
+      <div class="codeblock"><div class="codeblock__label">version-1 → version-2</div><pre><code><span class="p">$ </span>kubectl apply -k 03-generators/app
+<span class="p">$ </span>kubectl -n generators rollout status deploy/podinfo --timeout=180s
+<span class="p">$ </span>sed -i "s/version-1/version-2/" 03-generators/app/kustomization.yaml &amp;&amp; grep -n version-2 03-generators/app/kustomization.yaml
+<span class="p">$ </span>kubectl apply -k 03-generators/app
+<span class="p">$ </span>kubectl -n generators rollout status deploy/podinfo --timeout=180s
+<span class="p">$ </span>kubectl -n generators get rs,cm
+NAME                                 DESIRED   CURRENT   READY   AGE
+<span class="hl">replicaset.apps/podinfo-6c846858cd   1         1         1       2s</span>
+<span class="hl">replicaset.apps/podinfo-858d69f764   0         0         0       9s</span>
+
+NAME                                  DATA   AGE
+configmap/kube-root-ca.crt            1      9s
+<span class="hl">configmap/podinfo-config-8c2f6hg92d   2      12s</span>
+<span class="hl">configmap/podinfo-config-bd648984m7   2      2s</span></code></pre></div>
+      <div class="observe"><b>Qué observar</b>
+        <ul>
+          <li>Cambió el valor, cambió el hash y el nombre, cambió el pod template, y Kubernetes hizo rollout solo: hay un ReplicaSet nuevo.</li>
+          <li>El ConfigMap viejo sigue ahí: <code>apply</code> no lo borra. Flux sí, con <code>prune: true</code>.</li>
+        </ul>
+      </div>
+
+      <h3>El caso de un CRD</h3>
+      <details class="files"><summary>crd-ref: kustomization.yaml, helmrelease.yaml y base.yaml<span>3 archivos</span></summary><div class="codeblock"><div class="codeblock__label">03-generators/crd-ref/kustomization.yaml</div><pre><code><span class="k">apiVersion</span>: kustomize.config.k8s.io/v1beta1
+<span class="k">kind</span>: Kustomization
+<span class="k">resources</span>:
+  - helmrelease.yaml
+<span class="k">configMapGenerator</span>:
+  - <span class="k">name</span>: values-podinfo
+    <span class="k">files</span>:
+      - base.yaml</code></pre></div><div class="codeblock"><div class="codeblock__label">03-generators/crd-ref/helmrelease.yaml</div><pre><code><span class="c"># Solo se renderiza, no se aplica: sirve para ver qué pasa con el hash</span>
+<span class="c"># cuando quien referencia el ConfigMap es un CRD.</span>
+<span class="k">apiVersion</span>: helm.toolkit.fluxcd.io/v2
+<span class="k">kind</span>: HelmRelease
+<span class="k">metadata</span>:
+  <span class="k">name</span>: podinfo
+<span class="k">spec</span>:
+  <span class="k">interval</span>: 10m
+  <span class="k">chart</span>:
+    <span class="k">spec</span>:
+      <span class="k">chart</span>: podinfo
+      <span class="k">sourceRef</span>: {kind: HelmRepository, name: podinfo}
+  <span class="k">valuesFrom</span>:
+    - <span class="k">kind</span>: ConfigMap
+      <span class="k">name</span>: values-podinfo
+      <span class="k">valuesKey</span>: base.yaml</code></pre></div><div class="codeblock"><div class="codeblock__label">03-generators/crd-ref/base.yaml</div><pre><code><span class="k">replicaCount</span>: 1</code></pre></div></details>
+      <div class="codeblock"><div class="codeblock__label">render del CRD · sin error</div><pre><code><span class="p">$ </span>kubectl kustomize 03-generators/crd-ref
+<span class="k">apiVersion</span>: v1
+<span class="k">data</span>:
+  <span class="k">base.yaml</span>: |
+    <span class="k">replicaCount</span>: 1
+<span class="k">kind</span>: ConfigMap
+<span class="k">metadata</span>:
+<span class="hl">  <span class="k">name</span>: values-podinfo-6bdg5tmhf7</span>
+---
+<span class="k">apiVersion</span>: helm.toolkit.fluxcd.io/v2
+<span class="k">kind</span>: HelmRelease
+<span class="k">metadata</span>:
+  <span class="k">name</span>: podinfo
+<span class="k">spec</span>:
+  <span class="k">chart</span>:
+    <span class="k">spec</span>:
+      <span class="k">chart</span>: podinfo
+      <span class="k">sourceRef</span>:
+        <span class="k">kind</span>: HelmRepository
+        <span class="k">name</span>: podinfo
+  <span class="k">interval</span>: 10m
+  <span class="k">valuesFrom</span>:
+  - <span class="k">kind</span>: ConfigMap
+<span class="hl">    <span class="k">name</span>: values-podinfo</span>
+    <span class="k">valuesKey</span>: base.yaml</code></pre></div>
+      <p>El ConfigMap sale con hash, pero el HelmRelease sigue apuntando a <code>values-podinfo</code>, que no existe: Kustomize no conoce los campos de los CRDs (<a href="#d1">detalle 1</a>).</p>
+
+      <h3><code>disableNameSuffixHash</code>: cuándo sí y cuándo no</h3>
+      <p>Se desactiva con <code>generatorOptions</code> o por generador con <code>options</code> (<a href="https://kubectl.docs.kubernetes.io/references/kustomize/kustomization/generatoroptions/">docs</a>).</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Con hash (default)</th><th>Sin hash</th></tr></thead>
+          <tbody>
+            <tr><td>Rollout automático al cambiar la config</td><td>Nombre estable</td></tr>
+            <tr><td>Para ConfigMaps de Deployments propios</td><td>Necesario si lo referencia algo que Kustomize no reescribe (un HelmRelease, otro repo)</td></tr>
+            <tr><td>Deja ConfigMaps viejos (requiere prune)</td><td>El reinicio depende de otro mecanismo (helm-controller hace upgrade)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ============================ PASO 4 ============================ -->
+    <section id="paso-4" class="st-k">
+      <div class="step__eyebrow"><b>Paso 4</b><span>10 min</span><span class="chip">Kustomize</span><span class="chip chip--plain">sin clúster</span></div>
+      <h2><code>behavior: merge</code> y <code>replace</code></h2>
+      <p class="objective">La base genera <code>values-podinfo</code> con la clave <code>base.yaml</code>, y el overlay le agrega <code>env.yaml</code> al <strong>mismo</strong> ConfigMap.</p>
+      <p>Si el overlay declara un generador con el mismo nombre, <code>behavior</code> decide (<a href="https://kubectl.docs.kubernetes.io/references/kustomize/kustomization/configmapgenerator/">docs</a>):</p>
+      <ul>
+        <li><code>create</code> (default): falla por nombre duplicado.</li>
+        <li><code>merge</code>: agrega claves; si la clave ya existe, la del overlay reemplaza el valor entero.</li>
+        <li><code>replace</code>: deja solo el contenido del overlay.</li>
+      </ul>
+      <details class="files"><summary>La base: kustomization.yaml y values<span>2 archivos</span></summary><div class="codeblock"><div class="codeblock__label">04-merge/base/kustomization.yaml</div><pre><code><span class="k">apiVersion</span>: kustomize.config.k8s.io/v1beta1
+<span class="k">kind</span>: Kustomization
+<span class="k">namespace</span>: podinfo
+<span class="k">generatorOptions</span>:
+  <span class="k">disableNameSuffixHash</span>: true    <span class="c"># el nombre lo referencia un HelmRelease (CRD)</span>
+<span class="k">configMapGenerator</span>:
+  - <span class="k">name</span>: values-podinfo
+    <span class="k">files</span>:
+      - base.yaml=values/values-podinfo.yaml   <span class="c"># clave=archivo</span></code></pre></div><div class="codeblock"><div class="codeblock__label">04-merge/base/values/values-podinfo.yaml</div><pre><code><span class="k">replicaCount</span>: 1
+<span class="k">ui</span>:
+  <span class="k">message</span>: "valor de la base"
+  <span class="k">color</span>: "#34577c"</code></pre></div></details>
+      <div class="pair">
+        <div class="codeblock"><div class="codeblock__label">overlays/dev/kustomization.yaml</div><pre><code><span class="k">apiVersion</span>: kustomize.config.k8s.io/v1beta1
+<span class="k">kind</span>: Kustomization
+<span class="k">resources</span>:
+  - ../../base
+<span class="k">configMapGenerator</span>:
+  - <span class="k">name</span>: values-podinfo         <span class="c"># mismo nombre que en la base</span>
+    <span class="k">behavior</span>: merge              <span class="c"># agrega/pisa claves sobre el ConfigMap de la base</span>
+    <span class="k">files</span>:
+      - env.yaml</code></pre></div>
+        <div class="codeblock"><div class="codeblock__label">overlays/prd/kustomization.yaml</div><pre><code><span class="k">apiVersion</span>: kustomize.config.k8s.io/v1beta1
+<span class="k">kind</span>: Kustomization
+<span class="k">resources</span>:
+  - ../../base
+<span class="k">configMapGenerator</span>:
+  - <span class="k">name</span>: values-podinfo
+    <span class="k">behavior</span>: replace            <span class="c"># descarta el contenido de la base por completo</span>
+    <span class="k">files</span>:
+      - env.yaml</code></pre></div>
+      </div>
+      <details class="files"><summary>env.yaml de dev y de prd<span>2 archivos</span></summary><div class="codeblock"><div class="codeblock__label">04-merge/overlays/dev/env.yaml</div><pre><code><span class="k">ui</span>:
+  <span class="k">message</span>: "valor de dev"</code></pre></div><div class="codeblock"><div class="codeblock__label">04-merge/overlays/prd/env.yaml</div><pre><code><span class="k">replicaCount</span>: 3</code></pre></div></details>
+      <div class="codeblock"><div class="codeblock__label">dev · behavior: merge</div><pre><code><span class="p">$ </span>kubectl kustomize 04-merge/overlays/dev
+<span class="k">apiVersion</span>: v1
+<span class="k">data</span>:
+<span class="hl">  <span class="k">base.yaml</span>: |</span>
+    <span class="k">replicaCount</span>: 1
+    <span class="k">ui</span>:
+      <span class="k">message</span>: "valor de la base"
+      <span class="k">color</span>: "#34577c"
+<span class="hl">  <span class="k">env.yaml</span>: |</span>
+    <span class="k">ui</span>:
+      <span class="k">message</span>: "valor de dev"
+<span class="k">kind</span>: ConfigMap
+<span class="k">metadata</span>:
+  <span class="k">name</span>: values-podinfo
+  <span class="k">namespace</span>: podinfo</code></pre></div>
+      <div class="codeblock"><div class="codeblock__label">prd · behavior: replace</div><pre><code><span class="p">$ </span>kubectl kustomize 04-merge/overlays/prd
+<span class="k">apiVersion</span>: v1
+<span class="k">data</span>:
+<span class="hl">  <span class="k">env.yaml</span>: |</span>
+    <span class="k">replicaCount</span>: 3
+<span class="k">kind</span>: ConfigMap
+<span class="k">metadata</span>:
+  <span class="k">name</span>: values-podinfo
+  <span class="k">namespace</span>: podinfo</code></pre></div>
+      <div class="observe"><b>Qué observar</b>
+        <ul>
+          <li><strong>dev</strong>: dos claves sin combinar, cada una con su <code>ui.message</code>. Las combina helm-controller en el <a href="#paso-7-b">paso 7</a>.</li>
+          <li><strong>dev</strong>: sigue sin hash y en el namespace <code>podinfo</code> aunque el overlay no declare <code>generatorOptions</code> ni <code>namespace</code>: los hereda de la base.</li>
+          <li><strong>prd</strong>: solo queda <code>env.yaml</code>. El HelmRelease del repo fallaría porque <code>base.yaml</code> no es opcional.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ============================ PASO 5 ============================ -->
+    <section id="paso-5" class="st-s">
+      <div class="step__eyebrow"><b>Paso 5</b><span>10 min</span><span class="chip">Flux envsubst</span><span class="chip chip--plain">sin clúster</span></div>
+      <h2>Reemplazo de variables</h2>
+      <p class="objective">Comparar <code>replacements</code> de Kustomize con la sustitución <code>${VAR}</code> de Flux, simulada en local con <code>flux envsubst</code>.</p>
+
+      <h3>Kustomize: <code>replacements</code></h3>
+      <p>Copia un campo de un recurso a una ruta exacta de otro (<a href="https://kubectl.docs.kubernetes.io/references/kustomize/kustomization/replacements/">docs</a>).</p>
+      <div class="codeblock"><div class="codeblock__label">replacements/kustomization.yaml</div><pre><code><span class="k">apiVersion</span>: kustomize.config.k8s.io/v1beta1
+<span class="k">kind</span>: Kustomization
+<span class="k">resources</span>:
+  - cluster-vars.yaml
+  - deployment.yaml
+<span class="k">replacements</span>:
+  <span class="c"># Copia un campo de un recurso a otro. Sin plantillas: el destino es una ruta exacta.</span>
+  - <span class="k">source</span>:
+      <span class="k">kind</span>: ConfigMap
+      <span class="k">name</span>: cluster-vars
+      <span class="k">fieldPath</span>: data.CLUSTER_NAME
+    <span class="k">targets</span>:
+      - <span class="k">select</span>:
+          <span class="k">kind</span>: Deployment
+          <span class="k">name</span>: podinfo
+        <span class="k">fieldPaths</span>:
+          - spec.template.spec.containers.[name=podinfo].env.[name=PODINFO_UI_MESSAGE].value</code></pre></div>
+      <details class="files"><summary>cluster-vars.yaml y deployment.yaml (con PLACEHOLDER)<span>2 archivos</span></summary><div class="codeblock"><div class="codeblock__label">05-variables/replacements/cluster-vars.yaml</div><pre><code><span class="k">apiVersion</span>: v1
+<span class="k">kind</span>: ConfigMap
+<span class="k">metadata</span>:
+  <span class="k">name</span>: cluster-vars
+<span class="k">data</span>:
+  <span class="k">CLUSTER_NAME</span>: minikube-dev</code></pre></div><div class="codeblock"><div class="codeblock__label">05-variables/replacements/deployment.yaml</div><pre><code><span class="k">apiVersion</span>: apps/v1
+<span class="k">kind</span>: Deployment
+<span class="k">metadata</span>:
+  <span class="k">name</span>: podinfo
+<span class="k">spec</span>:
+  <span class="k">selector</span>:
+    <span class="k">matchLabels</span>: {app: podinfo}
+  <span class="k">template</span>:
+    <span class="k">metadata</span>:
+      <span class="k">labels</span>: {app: podinfo}
+    <span class="k">spec</span>:
+      <span class="k">containers</span>:
+        - <span class="k">name</span>: podinfo
+          <span class="k">image</span>: ghcr.io/stefanprodan/podinfo:6.7.1
+          <span class="k">env</span>:
+            - <span class="k">name</span>: PODINFO_UI_MESSAGE
+              <span class="k">value</span>: PLACEHOLDER</code></pre></div></details>
+      <div class="codeblock"><div class="codeblock__label">render filtrado</div><pre><code><span class="p">$ </span>kubectl kustomize 05-variables/replacements | grep -A1 PODINFO_UI_MESSAGE
+        - name: PODINFO_UI_MESSAGE
+<span class="hl">          value: minikube-dev</span></code></pre></div>
+      <p>Funciona, pero hay que declarar cada ruta destino, no entra en medio de un string y el valor tiene que estar en el mismo render, no en el clúster.</p>
+
+      <h3>Flux: <code>postBuild.substituteFrom</code></h3>
+      <p>Flux corre <code>kustomize build</code> y <strong>después</strong> reemplaza <code>${VAR}</code> en el texto, incluidos los values dentro de un ConfigMap (<a href="https://fluxcd.io/flux/components/kustomize/kustomizations/#post-build-variable-substitution">docs</a>):</p>
+      <ul>
+        <li><code>${VAR}</code> sin valor queda vacía, sin error.</li>
+        <li><code>${VAR:=default}</code> usa un valor por defecto.</li>
+        <li><code>$${VAR}</code> queda como <code>${VAR}</code> literal.</li>
+        <li><code>kustomize.toolkit.fluxcd.io/substitute: disabled</code> la desactiva en un recurso.</li>
+      </ul>
+      <p><code>flux envsubst</code> hace lo mismo en local con las variables del entorno, y <code>--strict</code> falla si falta alguna (<a href="https://fluxcd.io/flux/cmd/flux_envsubst/">docs</a>).</p>
+      <div class="codeblock"><div class="codeblock__label">flux-envsubst/values/values-grafana.yaml</div><pre><code><span class="c"># Values de juguete con dos tipos de variables (Flux sustituye también</span>
+<span class="c"># dentro de comentarios, por eso acá no se escribe la sintaxis literal).</span>
+<span class="k">grafana.ini</span>:
+  <span class="k">server</span>:
+    <span class="c"># La sustituye Flux con el ConfigMap cluster-vars:</span>
+    <span class="k">root_url</span>: "https://grafana.<span class="v">${CLUSTER_NAME}</span>.example.com"
+  <span class="k">auth.generic_oauth</span>:
+    <span class="c"># Es sintaxis de Grafana (variable de entorno del pod), NO de Flux:</span>
+    <span class="c"># va escapada con doble signo pesos para que Flux la deje intacta.</span>
+    <span class="k">client_secret</span>: "<span class="v">$${OAUTH_CLIENT_SECRET}</span>"</code></pre></div>
+      <details class="files"><summary>flux-envsubst/kustomization.yaml<span>1 archivo</span></summary><div class="codeblock"><div class="codeblock__label">05-variables/flux-envsubst/kustomization.yaml</div><pre><code><span class="k">apiVersion</span>: kustomize.config.k8s.io/v1beta1
+<span class="k">kind</span>: Kustomization
+<span class="k">namespace</span>: monitoring
+<span class="k">generatorOptions</span>:
+  <span class="k">disableNameSuffixHash</span>: true
+<span class="k">configMapGenerator</span>:
+  - <span class="k">name</span>: values-grafana
+    <span class="k">files</span>:
+      - base.yaml=values/values-grafana.yaml</code></pre></div></details>
+      <div class="codeblock"><div class="codeblock__label">sin la variable, en modo estricto <span class="exit">exit 1</span></div><pre><code><span class="p">$ </span>kubectl kustomize 05-variables/flux-envsubst | flux envsubst --strict
+<span class="k">apiVersion</span>: v1
+<span class="k">data</span>:
+  <span class="k">base.yaml</span>: |
+    <span class="c"># Values de juguete con dos tipos de variables (Flux sustituye también</span>
+    <span class="c"># dentro de comentarios, por eso acá no se escribe la sintaxis literal).</span>
+    <span class="k">grafana.ini</span>:
+      <span class="k">server</span>:
+        <span class="c"># La sustituye Flux con el ConfigMap cluster-vars:</span>
+<span class="hl">✗ variable not set (strict mode): "CLUSTER_NAME"</span></code></pre></div>
+      <div class="codeblock"><div class="codeblock__label">con CLUSTER_NAME=minikube-dev</div><pre><code><span class="p">$ </span>kubectl kustomize 05-variables/flux-envsubst | CLUSTER_NAME=minikube-dev flux envsubst --strict
+<span class="k">apiVersion</span>: v1
+<span class="k">data</span>:
+  <span class="k">base.yaml</span>: |
+    <span class="c"># Values de juguete con dos tipos de variables (Flux sustituye también</span>
+    <span class="c"># dentro de comentarios, por eso acá no se escribe la sintaxis literal).</span>
+    <span class="k">grafana.ini</span>:
+      <span class="k">server</span>:
+        <span class="c"># La sustituye Flux con el ConfigMap cluster-vars:</span>
+<span class="hl">        <span class="k">root_url</span>: "https://grafana.minikube-dev.example.com"</span>
+      <span class="k">auth.generic_oauth</span>:
+        <span class="c"># Es sintaxis de Grafana (variable de entorno del pod), NO de Flux:</span>
+        <span class="c"># va escapada con doble signo pesos para que Flux la deje intacta.</span>
+<span class="hl">        <span class="k">client_secret</span>: "<span class="v">${OAUTH_CLIENT_SECRET}</span>"</span>
+<span class="k">kind</span>: ConfigMap
+<span class="k">metadata</span>:
+  <span class="k">name</span>: values-grafana
+  <span class="k">namespace</span>: monitoring</code></pre></div>
+      <p><code>client_secret</code> conserva <code>${OAUTH_CLIENT_SECRET}</code> para Grafana gracias al <code>$$</code>. Sin escapar, quedaría vacío sin aviso (<a href="#d4">detalle 4</a>).</p>
+      <h4>Trampa: los comentarios también se sustituyen</h4>
+      <div class="codeblock"><div class="codeblock__label">un comentario con una variable que no existe <span class="exit">exit 1</span></div><pre><code><span class="p">$ </span>printf 'a: 1 # usa <span class="v">${NO_EXISTE}</span>\n' | flux envsubst --strict
+✗ variable not set (strict mode): "NO_EXISTE"
+
+<span class="p">$ </span>printf 'a: 1 # usa <span class="v">${NO_EXISTE}</span>\n' | flux envsubst
+a: 1 # usa </code></pre></div>
+    </section>
+
+    <!-- ============================ PASO 6 ============================ -->
+    <section id="paso-6" class="st-s">
+      <div class="step__eyebrow"><b>Paso 6</b><span>20 min</span><span class="chip">kustomize-controller</span><span class="chip chip--plain">minikube</span></div>
+      <h2>Flux en minikube</h2>
+      <p class="objective">Instalar Flux, servir un repo Git dentro del clúster y aplicar el overlay con las variables de <code>cluster-vars</code>.</p>
+
+      <h3 id="en-el-cluster">Qué va al clúster y qué no</h3>
+      <p>Las dos tienen <code>kind: Kustomization</code> y las dos están en Git. Lo que las distingue es el <code>apiVersion</code>:</p>
+      <div class="twins">
+        <div class="twin st-k">
+          <h4>kustomize.config.k8s.io/v1beta1</h4>
+          <span class="who">receta de Kustomize · no llega al clúster</span>
+          <p>Dice cómo renderizar una carpeta. La leen <code>kubectl kustomize</code>, Flux o ArgoCD, y lo que se aplica es el resultado (<a href="https://kubectl.docs.kubernetes.io/references/kustomize/kustomization/">docs</a>).</p>
+          <p>Ejemplo: <code>cluster-services/cluster-services-dev/kustomization.yaml</code>.</p>
+        </div>
+        <div class="twin st-s">
+          <h4>kustomize.toolkit.fluxcd.io/v1</h4>
+          <span class="who">CRD de Flux · objeto del clúster</span>
+          <p>Le dice a kustomize-controller qué carpeta de qué repo renderizar, con qué variables y si hace prune (<a href="https://fluxcd.io/flux/components/kustomize/kustomizations/">docs</a>). Equivale a una <code>Application</code> de ArgoCD.</p>
+          <p>Ejemplo: <code>cluster-core-config/minikube-dev/cluster-services.yaml</code>, que aplica <code>cluster-core-config</code>.</p>
+        </div>
+      </div>
+      <p>Todo lo demás que sale del render sí llega al clúster: ConfigMaps, namespaces, <code>HelmRepository</code> y <code>HelmRelease</code>. Los charts los instala helm-controller a partir del <code>HelmRelease</code> (<a href="#paso-7">paso 7</a>). En ArgoCD no existen ni esta Kustomization ni <code>HelmRelease</code>: la <code>Application</code> corre kustomize o <code>helm template</code> y aplica el resultado, sin release de Helm (<a href="#argocd">paso 8</a>).</p>
+      <p>En <code>cluster-core-config/minikube-dev/</code> no hay <code>kustomization.yaml</code>: Flux genera uno con todos los YAML del directorio (<a href="https://fluxcd.io/flux/components/kustomize/kustomizations/#generating-a-kustomizationyaml-file">docs</a>).</p>
+      <details class="files"><summary>gitops-repo/: el contenido inicial del repo<span>6 archivos</span></summary><div class="codeblock"><div class="codeblock__label">06-flux/gitops-repo/cluster-core-config/minikube-dev/cluster-vars.yaml</div><pre><code><span class="k">apiVersion</span>: v1
+<span class="k">kind</span>: ConfigMap
+<span class="k">metadata</span>:
+  <span class="k">name</span>: cluster-vars
+  <span class="k">namespace</span>: flux-system   <span class="c"># debe estar en el mismo namespace que la Kustomization de Flux que lo usa</span>
+<span class="k">data</span>:
+  <span class="k">CLUSTER_NAME</span>: minikube-dev
+  <span class="k">ENVIRONMENT</span>: dev</code></pre></div><div class="codeblock"><div class="codeblock__label">06-flux/gitops-repo/cluster-core-config/minikube-dev/cluster-services.yaml</div><pre><code><span class="c"># Kustomization de FLUX (no confundir con kustomization.yaml de Kustomize):</span>
+<span class="c"># "renderizá este path del repo, sustituí <span class="v">${VAR}</span> y aplicalo".</span>
+<span class="k">apiVersion</span>: kustomize.toolkit.fluxcd.io/v1
+<span class="k">kind</span>: Kustomization
+<span class="k">metadata</span>:
+  <span class="k">name</span>: cluster-services
+  <span class="k">namespace</span>: flux-system
+<span class="k">spec</span>:
+  <span class="k">interval</span>: 10m
+  <span class="k">sourceRef</span>:
+    <span class="k">kind</span>: GitRepository
+    <span class="k">name</span>: gitops
+  <span class="k">path</span>: ./cluster-services/cluster-services-dev
+  <span class="k">prune</span>: true
+  <span class="k">wait</span>: true
+  <span class="k">timeout</span>: 5m
+  <span class="k">postBuild</span>:
+    <span class="k">substituteFrom</span>:
+      - <span class="k">kind</span>: ConfigMap
+        <span class="k">name</span>: cluster-vars</code></pre></div><div class="codeblock"><div class="codeblock__label">06-flux/gitops-repo/cluster-services/base/kustomization.yaml</div><pre><code><span class="k">apiVersion</span>: kustomize.config.k8s.io/v1beta1
+<span class="k">kind</span>: Kustomization
+<span class="k">resources</span>:
+  - manifests/namespace.yaml
+  - manifests/cluster-info.yaml</code></pre></div><div class="codeblock"><div class="codeblock__label">06-flux/gitops-repo/cluster-services/base/manifests/namespace.yaml</div><pre><code><span class="k">apiVersion</span>: v1
+<span class="k">kind</span>: Namespace
+<span class="k">metadata</span>:
+  <span class="k">name</span>: podinfo</code></pre></div><div class="codeblock"><div class="codeblock__label">06-flux/gitops-repo/cluster-services/base/manifests/cluster-info.yaml</div><pre><code><span class="k">apiVersion</span>: v1
+<span class="k">kind</span>: ConfigMap
+<span class="k">metadata</span>:
+  <span class="k">name</span>: cluster-info
+  <span class="k">namespace</span>: podinfo
+<span class="k">data</span>:
+  <span class="k">cluster</span>: "<span class="v">${CLUSTER_NAME}</span>"
+  <span class="k">environment</span>: "<span class="v">${ENVIRONMENT}</span>"
+  <span class="k">region</span>: "<span class="v">${REGION:=sin-region}</span>"       <span class="c"># valor por defecto si la variable no existe</span>
+  <span class="k">literal</span>: "<span class="v">$${ESTO_NO_SE_SUSTITUYE}</span>"   <span class="c"># escapado: queda con un solo signo pesos</span></code></pre></div><div class="codeblock"><div class="codeblock__label">06-flux/gitops-repo/cluster-services/cluster-services-dev/kustomization.yaml</div><pre><code><span class="k">apiVersion</span>: kustomize.config.k8s.io/v1beta1
+<span class="k">kind</span>: Kustomization
+<span class="k">resources</span>:
+  - ../base</code></pre></div></details>
+      <details class="files"><summary>bootstrap y Git server<span>2 archivos</span></summary><div class="codeblock"><div class="codeblock__label">06-flux/bootstrap/gitops-source.yaml</div><pre><code><span class="c"># Lo único que se aplica a mano: la fuente Git y la Kustomization raíz.</span>
+<span class="c"># Equivale a lo que hace `flux bootstrap` en un clúster real.</span>
+<span class="k">apiVersion</span>: source.toolkit.fluxcd.io/v1
+<span class="k">kind</span>: GitRepository
+<span class="k">metadata</span>:
+  <span class="k">name</span>: gitops
+  <span class="k">namespace</span>: flux-system
+<span class="k">spec</span>:
+  <span class="k">interval</span>: 1m
+  <span class="c"># DNS interno del Service: así lo ve source-controller desde el clúster.</span>
+  <span class="c"># (Desde la laptop se hace push a http://localhost:18080/gitops.git vía port-forward.)</span>
+  <span class="k">url</span>: http://git-server.git.svc.cluster.local/gitops.git
+  <span class="k">ref</span>:
+    <span class="k">branch</span>: main
+---
+<span class="k">apiVersion</span>: kustomize.toolkit.fluxcd.io/v1
+<span class="k">kind</span>: Kustomization
+<span class="k">metadata</span>:
+  <span class="k">name</span>: cluster-core-config
+  <span class="k">namespace</span>: flux-system
+<span class="k">spec</span>:
+  <span class="k">interval</span>: 10m
+  <span class="k">sourceRef</span>:
+    <span class="k">kind</span>: GitRepository
+    <span class="k">name</span>: gitops
+  <span class="k">path</span>: ./cluster-core-config/minikube-dev
+  <span class="k">prune</span>: true</code></pre></div><div class="codeblock"><div class="codeblock__label">06-flux/git-server/git-server.yaml</div><pre><code><span class="c"># Git server mínimo por HTTP (git-http-backend + lighttpd) SOLO para el taller:</span>
+<span class="c"># sin autenticación ni persistencia. Nunca usar fuera de un clúster local.</span>
+<span class="k">apiVersion</span>: v1
+<span class="k">kind</span>: Namespace
+<span class="k">metadata</span>:
+  <span class="k">name</span>: git
+---
+<span class="k">apiVersion</span>: v1
+<span class="k">kind</span>: ConfigMap
+<span class="k">metadata</span>:
+  <span class="k">name</span>: git-server
+  <span class="k">namespace</span>: git
+<span class="k">data</span>:
+  <span class="k">lighttpd.conf</span>: |
+    server.document-root = "/srv/git"
+    server.port = 8080
+    server.modules = ("mod_alias", "mod_cgi", "mod_setenv")
+    alias.url = ("/" =&gt; "/usr/libexec/git-core/git-http-backend/")
+    cgi.assign = ("" =&gt; "")
+    setenv.add-environment = ("GIT_PROJECT_ROOT" =&gt; "/srv/git", "GIT_HTTP_EXPORT_ALL" =&gt; "1")
+  <span class="k">start.sh</span>: |
+    set -e
+    apk add --no-cache git git-daemon lighttpd &gt;/dev/null
+    git init --bare -b main /srv/git/gitops.git
+    git -C /srv/git/gitops.git config http.receivepack true
+    exec lighttpd -D -f /etc/git-server/lighttpd.conf
+---
+<span class="k">apiVersion</span>: apps/v1
+<span class="k">kind</span>: Deployment
+<span class="k">metadata</span>:
+  <span class="k">name</span>: git-server
+  <span class="k">namespace</span>: git
+<span class="k">spec</span>:
+  <span class="k">replicas</span>: 1
+  <span class="k">selector</span>:
+    <span class="k">matchLabels</span>: {app: git-server}
+  <span class="k">template</span>:
+    <span class="k">metadata</span>:
+      <span class="k">labels</span>: {app: git-server}
+    <span class="k">spec</span>:
+      <span class="k">containers</span>:
+        - <span class="k">name</span>: git
+          <span class="k">image</span>: alpine:3.20
+          <span class="k">command</span>: ["sh", "/etc/git-server/start.sh"]
+          <span class="k">ports</span>: [{containerPort: 8080}]
+          <span class="k">readinessProbe</span>:
+            <span class="k">tcpSocket</span>: {port: 8080}
+          <span class="k">volumeMounts</span>:
+            - {name: conf, mountPath: /etc/git-server}
+            - {name: repos, mountPath: /srv/git}
+      <span class="k">volumes</span>:
+        - {name: conf, configMap: {name: git-server}}
+        - {name: repos, emptyDir: {}}
+---
+<span class="k">apiVersion</span>: v1
+<span class="k">kind</span>: Service
+<span class="k">metadata</span>:
+  <span class="k">name</span>: git-server
+  <span class="k">namespace</span>: git
+<span class="k">spec</span>:
+  <span class="k">selector</span>: {app: git-server}
+  <span class="k">ports</span>: [{port: 80, targetPort: 8080}]</code></pre></div></details>
+
+      <h3>1. Instalar Flux y el Git server</h3>
+      <p><code>flux install</code> instala los controladores sin conectar un repo (<a href="https://fluxcd.io/flux/cmd/flux_install/">docs</a>). El Git server es un alpine con lighttpd y <code>git-http-backend</code>, sin auth: <code>GitRepository</code> no acepta <code>git://</code> (<a href="https://fluxcd.io/flux/components/source/gitrepositories/#url">docs</a>).</p>
+      <dl class="urls">
+        <dt>Desde la laptop</dt><dd><code>http://localhost:18080/gitops.git</code>, por port-forward</dd>
+        <dt>Desde Flux</dt><dd><code>http://git-server.git.svc.cluster.local/gitops.git</code></dd>
+      </dl>
+      <div class="codeblock"><div class="codeblock__label">Flux y Git server</div><pre><code><span class="p">$ </span>flux check --pre
+<span class="p">$ </span>flux install
+<span class="p">$ </span>kubectl apply -f 06-flux/git-server/git-server.yaml
+<span class="p">$ </span>kubectl -n git rollout status deploy/git-server --timeout=180s</code></pre></div>
+
+      <h3>2. Push del repo y bootstrap</h3>
+      <div class="codeblock"><div class="codeblock__label">push, fuente y Kustomization raíz</div><pre><code><span class="p">$ </span>rm -rf work &amp;&amp; mkdir -p work &amp;&amp; cp -r 06-flux/gitops-repo work/gitops &amp;&amp; cd work/gitops &amp;&amp; git init -q -b main &amp;&amp; git add . &amp;&amp; git commit -q -m "paso 6: base, overlay dev y cluster-core-config" &amp;&amp; git remote add origin http://localhost:18080/gitops.git &amp;&amp; git push -u origin main
+<span class="p">$ </span>kubectl apply -f 06-flux/bootstrap/gitops-source.yaml
+<span class="p">$ </span>flux get kustomizations
+NAME               	REVISION          	SUSPENDED	READY	MESSAGE                              
+<span class="hl">cluster-core-config	main@sha1:bde0af86	False    	True 	Applied revision: main@sha1:bde0af86	</span>
+<span class="hl">cluster-services   	main@sha1:bde0af86	False    	True 	Applied revision: main@sha1:bde0af86	</span></code></pre></div>
+      <div class="codeblock">
+        <div class="codeblock__label">Cadena resultante, como un app-of-apps</div>
+<pre><code>GitRepository gitops
+└── Kustomization cluster-core-config   <span class="c">(aplicada a mano)  -&gt; path cluster-core-config/minikube-dev</span>
+    ├── ConfigMap cluster-vars
+    └── Kustomization cluster-services  <span class="c">(creada desde Git) -&gt; path cluster-services/cluster-services-dev</span>
+        └── namespace podinfo + ConfigMap cluster-info <span class="c">(con <span class="v">${VAR}</span> sustituidas)</span></code></pre>
+      </div>
+      <div class="codeblock"><div class="codeblock__label">el ConfigMap cluster-info en el clúster</div><pre><code><span class="p">$ </span>kubectl -n podinfo get cm cluster-info -o jsonpath="{.data}"; echo
+{"cluster":"minikube-dev","environment":"dev","literal":"<span class="v">${ESTO_NO_SE_SUSTITUYE}</span>","region":"sin-region"}</code></pre></div>
+      <div class="observe"><b>Qué observar</b>
+        <ul>
+          <li><code>cluster</code> y <code>environment</code> vienen de <code>cluster-vars</code>, <code>region</code> tomó el default y <code>literal</code> quedó con un solo <code>$</code>.</li>
+          <li><code>cluster-vars</code> está en <code>flux-system</code>, el namespace de la Kustomization: <code>substituteFrom</code> no acepta namespace (<a href="https://fluxcd.io/flux/components/kustomize/api/v1/#kustomize.toolkit.fluxcd.io/v1.SubstituteReference">API</a>).</li>
+        </ul>
+      </div>
+
+      <h3>3. El ciclo GitOps</h3>
+      <div class="codeblock"><div class="codeblock__label">ENVIRONMENT: dev → desarrollo</div><pre><code><span class="p">$ </span>cd work/gitops &amp;&amp; sed -i "s/ENVIRONMENT: dev/ENVIRONMENT: desarrollo/" cluster-core-config/minikube-dev/cluster-vars.yaml &amp;&amp; git commit -q -am "cambiar ENVIRONMENT" &amp;&amp; git push
+<span class="p">$ </span>flux reconcile kustomization cluster-core-config --with-source &amp;&amp; flux reconcile kustomization cluster-services
+<span class="p">$ </span>kubectl -n podinfo get cm cluster-info -o jsonpath="{.data.environment}"; echo
+<span class="hl">desarrollo</span></code></pre></div>
+    </section>
+
+    <!-- ============================ PASO 7 ============================ -->
+    <section id="paso-7" class="st-h">
+      <div class="step__eyebrow"><b>Paso 7</b><span>15 min</span><span class="chip">helm-controller</span><span class="chip chip--plain">minikube</span></div>
+      <h2>HelmRelease con <code>valuesFrom</code></h2>
+      <p class="objective">Desplegar podinfo con un HelmRelease que lee <code>base.yaml</code> y <code>env.yaml</code> de un ConfigMap, y ver que <code>env.yaml</code> pisa a <code>base.yaml</code>.</p>
+      <p><a href="https://github.com/stefanprodan/podinfo">podinfo</a> es la app de ejemplo de Flux. Las entradas de <code>valuesFrom</code> se combinan en orden y gana la última (<a href="https://fluxcd.io/flux/components/helm/helmreleases/#values-references">docs</a>). Los archivos se copian al repo de trabajo en tres fases.</p>
+
+      <div class="phase" id="paso-7-a"><h3>Fase A: solo <code>base.yaml</code></h3><span>fase-a/cluster-services/base/</span></div>
+      <div class="codeblock"><div class="codeblock__label">applications/podinfo.yaml · HelmRelease</div><pre><code><span class="k">apiVersion</span>: helm.toolkit.fluxcd.io/v2
+<span class="k">kind</span>: HelmRelease
+<span class="k">metadata</span>:
+  <span class="k">name</span>: podinfo
+  <span class="k">namespace</span>: podinfo
+<span class="k">spec</span>:
+  <span class="k">interval</span>: 10m
+  <span class="k">chart</span>:
+    <span class="k">spec</span>:
+      <span class="k">chart</span>: podinfo
+      <span class="k">version</span>: "6.7.1"
+      <span class="k">sourceRef</span>:
+        <span class="k">kind</span>: HelmRepository
+        <span class="k">name</span>: podinfo
+        <span class="k">namespace</span>: flux-system
+  <span class="c"># El orden importa: cada entrada se mergea sobre la anterior (la última gana).</span>
+  <span class="k">valuesFrom</span>:
+    - <span class="k">kind</span>: ConfigMap
+      <span class="k">name</span>: values-podinfo
+      <span class="k">valuesKey</span>: base.yaml
+    - <span class="k">kind</span>: ConfigMap
+      <span class="k">name</span>: values-podinfo
+      <span class="k">valuesKey</span>: env.yaml
+      <span class="k">optional</span>: true          <span class="c"># si la clave no existe, se ignora sin error</span></code></pre></div>
+      <div class="pair">
+        <div class="codeblock"><div class="codeblock__label">base/kustomization.yaml</div><pre><code><span class="k">apiVersion</span>: kustomize.config.k8s.io/v1beta1
+<span class="k">kind</span>: Kustomization
+<span class="k">resources</span>:
+  - manifests/namespace.yaml
+  - manifests/cluster-info.yaml
+  - sources/podinfo.yaml
+  - applications/podinfo.yaml
+<span class="k">generatorOptions</span>:
+  <span class="c"># Sin hash: el HelmRelease referencia el ConfigMap por nombre fijo</span>
+  <span class="c"># y Kustomize no reescribe referencias dentro de CRDs.</span>
+  <span class="k">disableNameSuffixHash</span>: true
+<span class="k">configMapGenerator</span>:
+  - <span class="k">name</span>: values-podinfo
+    <span class="k">namespace</span>: podinfo
+    <span class="k">files</span>:
+      - base.yaml=values/values-podinfo.yaml</code></pre></div>
+        <div class="codeblock"><div class="codeblock__label">values/values-podinfo.yaml → base.yaml</div><pre><code><span class="k">replicaCount</span>: 1
+<span class="k">ui</span>:
+  <span class="k">message</span>: "podinfo en <span class="v">${CLUSTER_NAME}</span>"
+  <span class="k">color</span>: "#34577c"
+<span class="k">resources</span>:
+  <span class="k">requests</span>:
+    <span class="k">cpu</span>: 10m
+    <span class="k">memory</span>: 32Mi</code></pre></div>
+      </div>
+      <details class="files"><summary>sources/podinfo.yaml · HelmRepository<span>1 archivo</span></summary><div class="codeblock"><div class="codeblock__label">07-helmrelease/fase-a/cluster-services/base/sources/podinfo.yaml</div><pre><code><span class="k">apiVersion</span>: source.toolkit.fluxcd.io/v1
+<span class="k">kind</span>: HelmRepository
+<span class="k">metadata</span>:
+  <span class="k">name</span>: podinfo
+  <span class="k">namespace</span>: flux-system
+<span class="k">spec</span>:
+  <span class="k">interval</span>: 1h
+  <span class="k">url</span>: https://stefanprodan.github.io/podinfo</code></pre></div></details>
+      <div class="codeblock"><div class="codeblock__label">push, reconcile y estado</div><pre><code><span class="p">$ </span>cp -r 07-helmrelease/fase-a/. work/gitops/ &amp;&amp; cd work/gitops &amp;&amp; git add . &amp;&amp; git commit -q -m "paso 7a: helmrelease podinfo" &amp;&amp; git push
+<span class="p">$ </span>flux reconcile kustomization cluster-services --with-source
+<span class="p">$ </span>flux get helmreleases -A
+NAMESPACE	NAME   	REVISION	SUSPENDED	READY	MESSAGE                                                                        
+<span class="hl">podinfo  	podinfo	6.7.1   	False    	True 	Helm install succeeded for release podinfo/podinfo.v1 with chart podinfo@6.7.1	</span></code></pre></div>
+      <div class="codeblock"><div class="codeblock__label">helm get values</div><pre><code><span class="p">$ </span>helm -n podinfo get values podinfo
+USER-SUPPLIED VALUES:
+<span class="k">replicaCount</span>: 1
+<span class="k">resources</span>:
+  <span class="k">requests</span>:
+    <span class="k">cpu</span>: 10m
+    <span class="k">memory</span>: 32Mi
+<span class="k">ui</span>:
+  <span class="k">color</span>: '#34577c'
+<span class="hl">  <span class="k">message</span>: podinfo en minikube-dev</span></code></pre></div>
+      <p>Queda <code>Ready</code> aunque <code>env.yaml</code> no existe (es <code>optional: true</code>), y <code>${CLUSTER_NAME}</code>, que estaba dentro del archivo de values, ya está sustituida.</p>
+
+      <div class="phase" id="paso-7-b"><h3>Fase B: el overlay agrega <code>env.yaml</code></h3><span>fase-b/cluster-services/cluster-services-dev/</span></div>
+      <div class="pair">
+        <div class="codeblock"><div class="codeblock__label">cluster-services-dev/kustomization.yaml</div><pre><code><span class="k">apiVersion</span>: kustomize.config.k8s.io/v1beta1
+<span class="k">kind</span>: Kustomization
+<span class="k">resources</span>:
+  - ../base
+<span class="k">configMapGenerator</span>:
+  - <span class="k">name</span>: values-podinfo
+    <span class="k">namespace</span>: podinfo
+    <span class="k">behavior</span>: merge
+    <span class="k">files</span>:
+      - env.yaml=values/values-podinfo.yaml</code></pre></div>
+        <div class="codeblock"><div class="codeblock__label">values/values-podinfo.yaml → env.yaml</div><pre><code><span class="k">replicaCount</span>: 2
+<span class="k">ui</span>:
+  <span class="k">color</span>: "#2e7d32"</code></pre></div>
+      </div>
+      <div class="codeblock"><div class="codeblock__label">el ConfigMap: dos claves, sin combinar</div><pre><code><span class="p">$ </span>cp -r 07-helmrelease/fase-b/. work/gitops/ &amp;&amp; cd work/gitops &amp;&amp; git add . &amp;&amp; git commit -q -m "paso 7b: env.yaml en dev" &amp;&amp; git push
+<span class="p">$ </span>flux reconcile kustomization cluster-services --with-source &amp;&amp; flux reconcile helmrelease podinfo -n podinfo
+<span class="p">$ </span>kubectl -n podinfo get cm values-podinfo -o yaml | sed -n "/^data:/,/^kind:/p"
+<span class="k">data</span>:
+<span class="hl">  <span class="k">base.yaml</span>: |</span>
+    <span class="k">replicaCount</span>: 1
+    <span class="k">ui</span>:
+      <span class="k">message</span>: "podinfo en minikube-dev"
+      <span class="k">color</span>: "#34577c"
+    <span class="k">resources</span>:
+      <span class="k">requests</span>:
+        <span class="k">cpu</span>: 10m
+        <span class="k">memory</span>: 32Mi
+<span class="hl">  <span class="k">env.yaml</span>: |</span>
+    <span class="k">replicaCount</span>: 2
+    <span class="k">ui</span>:
+      <span class="k">color</span>: "#2e7d32"
+<span class="k">kind</span>: ConfigMap</code></pre></div>
+      <div class="codeblock"><div class="codeblock__label">helm get values: el merge profundo</div><pre><code><span class="p">$ </span>helm -n podinfo get values podinfo
+USER-SUPPLIED VALUES:
+<span class="hl"><span class="k">replicaCount</span>: 2</span>
+<span class="k">resources</span>:
+  <span class="k">requests</span>:
+    <span class="k">cpu</span>: 10m
+    <span class="k">memory</span>: 32Mi
+<span class="k">ui</span>:
+<span class="hl">  <span class="k">color</span>: '#2e7d32'</span>
+  <span class="k">message</span>: podinfo en minikube-dev</code></pre></div>
+      <div class="codeblock"><div class="codeblock__label">helm history</div><pre><code><span class="p">$ </span>helm -n podinfo history podinfo
+REVISION	UPDATED                 	STATUS    	CHART        	APP VERSION	DESCRIPTION     
+1       	Tue Nov 17 15:33:22 2026	superseded	podinfo-6.7.1	6.7.1      	Install complete
+<span class="hl">2       	Tue Nov 17 15:33:37 2026	deployed  	podinfo-6.7.1	6.7.1      	Upgrade complete</span></code></pre></div>
+      <p><code>replicaCount</code> y <code>ui.color</code> vienen de <code>env.yaml</code>; <code>ui.message</code> y <code>resources</code>, de <code>base.yaml</code>. El merge profundo lo hizo helm-controller, en la revisión 2.</p>
+
+      <div class="phase" id="paso-7-c"><h3>Fase C: upgrade sin reconcile manual</h3><span>fase-c/cluster-services/base/</span></div>
+      <p>Sin la label: <code>replicaCount</code> a 3 y reconcile solo de la Kustomization.</p>
+      <div class="codeblock"><div class="codeblock__label">el ConfigMap ya cambió</div><pre><code><span class="p">$ </span>cd work/gitops &amp;&amp; sed -i "s/replicaCount: 2/replicaCount: 3/" cluster-services/cluster-services-dev/values/values-podinfo.yaml &amp;&amp; git commit -q -am "replicaCount 3" &amp;&amp; git push
+<span class="p">$ </span>flux reconcile kustomization cluster-services --with-source
+<span class="p">$ </span>kubectl -n podinfo get cm values-podinfo -o jsonpath="{.data.env\.yaml}"
+<span class="k">replicaCount</span>: 3
+<span class="k">ui</span>:
+  <span class="k">color</span>: "#2e7d32"</code></pre></div>
+      <div class="codeblock"><div class="codeblock__label">30 s después: sigue la revisión 2</div><pre><code><span class="p">$ </span>sleep 30; helm -n podinfo history podinfo | tail -1
+<span class="hl">2       	Tue Nov 17 15:33:37 2026	deployed  	podinfo-6.7.1	6.7.1      	Upgrade complete</span></code></pre></div>
+      <p>El HelmRelease relee sus values recién en su <code>interval</code> (10 min). Con la label <code>reconcile.fluxcd.io/watch: Enabled</code> (<a href="https://fluxcd.io/flux/components/helm/helmreleases/#recommended-settings">recomendada</a>) y <code>replicaCount</code> a 4:</p>
+      <div class="codeblock"><div class="codeblock__label">fase-c · base/kustomization.yaml</div><pre><code><span class="k">apiVersion</span>: kustomize.config.k8s.io/v1beta1
+<span class="k">kind</span>: Kustomization
+<span class="k">resources</span>:
+  - manifests/namespace.yaml
+  - manifests/cluster-info.yaml
+  - sources/podinfo.yaml
+  - applications/podinfo.yaml
+<span class="k">generatorOptions</span>:
+  <span class="k">disableNameSuffixHash</span>: true
+  <span class="k">labels</span>:
+    <span class="c"># Le pide a helm-controller que vigile este ConfigMap y haga upgrade</span>
+    <span class="c"># apenas cambie, sin esperar el interval del HelmRelease.</span>
+    <span class="k">reconcile.fluxcd.io/watch</span>: Enabled
+<span class="k">configMapGenerator</span>:
+  - <span class="k">name</span>: values-podinfo
+    <span class="k">namespace</span>: podinfo
+    <span class="k">files</span>:
+      - base.yaml=values/values-podinfo.yaml</code></pre></div>
+      <div class="codeblock"><div class="codeblock__label">20 s después: revisión 3</div><pre><code><span class="p">$ </span>cp -r 07-helmrelease/fase-c/. work/gitops/ &amp;&amp; sed -i "s/replicaCount: 3/replicaCount: 4/" work/gitops/cluster-services/cluster-services-dev/values/values-podinfo.yaml &amp;&amp; cd work/gitops &amp;&amp; git commit -q -am "paso 7c: watch label y 4 réplicas" &amp;&amp; git push
+<span class="p">$ </span>flux reconcile kustomization cluster-services --with-source
+<span class="p">$ </span>sleep 20; helm -n podinfo history podinfo | tail -1
+<span class="hl">3       	Tue Nov 17 15:34:18 2026	deployed  	podinfo-6.7.1	6.7.1      	Upgrade complete</span></code></pre></div>
+      <div class="codeblock"><div class="codeblock__label">label, historial y Deployment</div><pre><code><span class="p">$ </span>kubectl -n podinfo get cm values-podinfo --show-labels
+NAME             DATA   AGE   LABELS
+<span class="hl">values-podinfo   2      89s   kustomize.toolkit.fluxcd.io/name=cluster-services,kustomize.toolkit.fluxcd.io/namespace=flux-system,reconcile.fluxcd.io/watch=Enabled</span>
+
+<span class="p">$ </span>helm -n podinfo history podinfo; kubectl -n podinfo rollout status deploy/podinfo --timeout=180s; kubectl -n podinfo get deploy podinfo
+REVISION	UPDATED                 	STATUS    	CHART        	APP VERSION	DESCRIPTION     
+1       	Tue Nov 17 15:33:22 2026	superseded	podinfo-6.7.1	6.7.1      	Install complete
+2       	Tue Nov 17 15:33:37 2026	superseded	podinfo-6.7.1	6.7.1      	Upgrade complete
+3       	Tue Nov 17 15:34:18 2026	deployed  	podinfo-6.7.1	6.7.1      	Upgrade complete
+deployment "podinfo" successfully rolled out
+NAME      READY   UP-TO-DATE   AVAILABLE   AGE
+<span class="hl">podinfo   4/4     4            4           87s</span></code></pre></div>
+      <div class="observe"><b>Qué observar</b>
+        <ul>
+          <li>Con la label, la revisión 3 llegó en segundos sin <code>flux reconcile helmrelease</code>, y el Deployment quedó en 4/4. El 3 nunca se aplicó.</li>
+          <li>La label sale de <code>generatorOptions.labels</code>. Las otras dos las pone Flux para indicar qué Kustomization aplicó el ConfigMap.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ============================ PASO 8 ============================ -->
+    <section id="paso-8" class="st-g">
+      <div class="step__eyebrow"><b>Paso 8</b><span>10 min</span><span class="chip">Cierre</span></div>
+      <h2>Cierre y validación</h2>
+      <p class="objective">Ubicar cada concepto en el repo, compararlo con ArgoCD y validar antes de un PR.</p>
+      <h3>Mapa del repo</h3>
+      <div class="codeblock">
+        <div class="codeblock__label">Cada concepto, en su lugar del repo</div>
+<pre><code>cluster-core-config/&lt;clúster&gt;/                         <span class="c">← paso 6</span>
+├── cluster-vars.yaml        <span class="c">ConfigMap en flux-system: CLUSTER_NAME, ENVIRONMENT...</span>
+└── Kustomizations de Flux   <span class="c">path + sourceRef + prune + postBuild.substituteFrom</span>
+        │                                              <span class="c">← paso 5: <span class="v">${VAR}</span> y <span class="v">$${...}</span></span>
+        ▼
+cluster-services/cluster-services-&lt;entorno&gt;/           <span class="c">← paso 2: overlay</span>
+└── kustomization.yaml
+    ├── resources: [../base]
+    └── configMapGenerator  behavior: merge  → agrega env.yaml   <span class="c">← paso 4</span>
+        │
+        ▼
+cluster-services/base/
+├── sources/        <span class="c">HelmRepository / OCIRepository / GitRepository</span>
+├── applications/   <span class="c">HelmRelease por servicio</span>
+│                   <span class="c">valuesFrom: base.yaml, luego env.yaml (optional)</span> <span class="c">← paso 7</span>
+├── values/         <span class="c">values-&lt;svc&gt;.yaml → clave base.yaml</span>
+├── manifests/      <span class="c">YAML plano (namespaces, CRs, etc.)</span>
+└── kustomization.yaml
+    └── configMapGenerator + disableNameSuffixHash             <span class="c">← paso 3</span></code></pre>
+      </div>
+
+      <h3 id="argocd">Frente al app-of-apps de ArgoCD</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ArgoCD</th><th>Flux (este repo)</th></tr></thead>
+          <tbody>
+            <tr><td><code>Application</code> raíz que crea otras <code>Application</code></td><td>Kustomization <code>cluster-core-config</code> que crea otras Kustomizations</td></tr>
+            <tr><td><code>ApplicationSet</code>: genera <code>Application</code> desde una lista, clústeres, carpetas de Git o PRs (<a href="https://argo-cd.readthedocs.io/en/stable/operator-manual/applicationset/Generators/">docs</a>)</td><td>Sin equivalente en el núcleo de Flux: una carpeta por clúster con <code>substituteFrom</code>, o el <code>ResourceSet</code> del Flux Operator, un proyecto aparte (<a href="https://fluxoperator.dev/docs/resourcesets/introduction/">docs</a>)</td></tr>
+            <tr><td>Cada <code>Application</code> apunta a un chart con <code>helm.valueFiles</code></td><td>HelmRelease con <code>valuesFrom</code> hacia ConfigMaps generados</td></tr>
+            <tr><td><code>helm template</code> y lo aplica ArgoCD: no hay release de Helm (<a href="https://argo-cd.readthedocs.io/en/stable/user-guide/helm/">docs</a>)</td><td><code>helm install/upgrade</code> real: <code>helm history</code> funciona</td></tr>
+            <tr><td>Variables por clúster: ApplicationSet o parámetros</td><td><code>postBuild.substituteFrom</code> con un ConfigMap del clúster</td></tr>
+            <tr><td>UI con diff y sync manual</td><td>Sin UI por defecto: <code>flux get</code>, <code>flux diff</code>, <code>flux reconcile</code></td></tr>
+            <tr><td>Prune y self-heal opcionales por app</td><td><code>prune: true</code>; el drift se corrige en cada <code>interval</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Errores típicos</h3>
+      <ul>
+        <li><strong>Hash en nombres que usa un CRD.</strong> Quitar <code>disableNameSuffixHash</code> no da error, pero el HelmRelease apunta a un ConfigMap inexistente (<a href="#paso-3">paso 3</a>).</li>
+        <li><strong><code>${...}</code> ajenos a Flux</strong> (Alloy, Grafana, Loki): quedan vacíos sin aviso. Escaparlos con <code>$${...}</code>, también en comentarios (<a href="#paso-5">paso 5</a>).</li>
+        <li><strong><code>replace</code> o <code>create</code> duplicado en el overlay.</strong> Se pierde <code>base.yaml</code> o falla el build (<a href="#paso-4">paso 4</a>).</li>
+        <li><strong><code>commonLabels</code> sobre algo desplegado.</strong> Cambia selectores inmutables (<a href="#paso-2">paso 2</a>).</li>
+        <li><strong>Campos inmutables, como el <code>template</code> de un Job.</strong> Anotar ese recurso con <code>kustomize.toolkit.fluxcd.io/force: enabled</code> para que Flux lo recree, en vez de <code>spec.force: true</code>, que recrea cualquier recurso con conflicto (<a href="https://fluxcd.io/flux/components/kustomize/kustomizations/#force">docs</a>). Si viene de un chart, <code>spec.upgrade.force</code> en el HelmRelease, de forma temporal (<a href="https://fluxcd.io/flux/components/helm/helmreleases/#upgrade-configuration">docs</a>).</li>
+        <li><strong>Un upgrade que no llega.</strong> Falta la label <code>reconcile.fluxcd.io/watch: Enabled</code> (<a href="#paso-7-c">paso 7, fase C</a>).</li>
+      </ul>
+
+      <h3 id="validar">Validar antes del PR</h3>
+      <p>Desde la raíz del repo GitOps. Los pasos 1 a 3 no necesitan clúster y sirven para CI.</p>
+      <ol class="checks">
+        <li>
+          <span class="n">1</span>
+          <div class="body">
+            <div class="row"><b>Errores de Kustomize, duplicados, rutas</b><span class="chip st-k">sin clúster</span></div>
+            <div class="codeblock"><pre><code>kubectl kustomize cluster-services/cluster-services-dev &gt; render.yaml</code></pre></div>
+          </div>
+        </li>
+        <li>
+          <span class="n">2</span>
+          <div class="body">
+            <div class="row"><b>Variables faltantes, en modo estricto</b><span class="chip st-s">sin clúster</span></div>
+            <div class="codeblock"><pre><code><span class="c"># con las variables del clúster, si hay acceso:</span>
+export $(kubectl -n flux-system get cm cluster-vars -o go-template='{{range $k,$v := .data}}{{$k}}={{$v}} {{end}}')
+flux envsubst --strict &lt; render.yaml &gt; final.yaml</code></pre></div>
+          </div>
+        </li>
+        <li>
+          <span class="n">3</span>
+          <div class="body">
+            <div class="row"><b>Los <code>${</code> que sobrevivieron</b><span class="chip st-s">sin clúster</span></div>
+            <div class="codeblock"><pre><code>grep -n '\${' final.yaml</code></pre></div>
+          </div>
+        </li>
+        <li>
+          <span class="n">4</span>
+          <div class="body">
+            <div class="row"><b>Diferencias contra el clúster</b><span class="chip chip--plain">contra el clúster</span></div>
+            <div class="codeblock"><pre><code>flux diff kustomization cluster-services --path ./cluster-services/cluster-services-dev</code></pre></div>
+          </div>
+        </li>
+      </ol>
+      <p><code>flux diff kustomization</code> aplica el <code>postBuild</code> real; si no imprime nada, no hay diferencias (<a href="https://fluxcd.io/flux/cmd/flux_diff_kustomization/">docs</a>).</p>
+      <h3>Limpieza</h3>
+      <p><code>./cleanup.sh</code> corta los port-forwards, borra el perfil <code>kustomize-ws</code> y <code>work/</code>, y restaura el literal del paso 3.</p>
+    </section>
+
+    <section id="codigo">
+      <h2>Código y versiones</h2>
+      <p>El taller completo (READMEs, manifiestos, Git server y <code>cleanup.sh</code>) está en <code>kustomize-flux-workshop/</code>:</p>
+      <div class="repo">
+        <a href="https://github.com/agustin130a/tech-articles/tree/main/kustomize-flux-workshop/">github.com/agustin130a/tech-articles</a>
+        <span>kustomize-flux-workshop/</span>
+      </div>
+      <p class="note">El artículo se probó con minikube v1.38.1, Kubernetes 1.35.1, kubectl v1.37.2 (Kustomize v5.8.1 embebido), Helm v3.16.4 y Flux 2.9.6. Las salidas de esta página son de una corrida del 17/11/2026 con Flux 2.10.0.</p>
+    </section>
+  </article>
+</div>
+
+<footer class="end">De ArgoCD a Flux: Kustomize sin miedo · taller en minikube, sin datos reales ni credenciales</footer>
+</body>
+</html>
